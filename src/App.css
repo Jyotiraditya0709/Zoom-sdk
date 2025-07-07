@@ -1,0 +1,122 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap");
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "Poppins", sans-serif;
+  background: radial-gradient(ellipse at top left, #0d0d0d, #1a1a1a);
+  color: white;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.app-container {
+  text-align: center;
+  position: relative;
+  z-index: 2;
+  max-width: 800px;
+  padding: 3rem;
+}
+
+.heading {
+  font-size: 3rem;
+  font-weight: 700;
+  margin-bottom: 2rem;
+  position: relative;
+  line-height: 1.2;
+}
+
+.google-gradient {
+  background: linear-gradient(to right, #0f9d58, #f4b400, #db4437);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.curved-arrow {
+  display: inline-block;
+  transform: rotate(10deg);
+  margin-left: 10px;
+  font-size: 1.5rem;
+}
+
+.form-box {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.input-field {
+  padding: 0.7rem 1rem;
+  border: 1px solid #333;
+  background: #1e1e1e;
+  color: white;
+  border-radius: 12px;
+  font-size: 1rem;
+  width: 250px;
+}
+
+.input-field::placeholder {
+  color: #aaa;
+}
+
+.join-button {
+  padding: 0.7rem 1.2rem;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  background: linear-gradient(to right, #0f9d58, #f4b400, #db4437);
+  color: white;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.join-button:hover {
+  transform: scale(1.05);
+}
+
+.video-box {
+  margin-top: 2rem;
+}
+
+.subheading {
+  font-size: 1.4rem;
+  margin-bottom: 1rem;
+}
+
+.video-container {
+  width: 640px;
+  height: 360px;
+  background: #000;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+  margin: 0 auto;
+}
+
+.yellow-blob {
+  position: absolute;
+  top: -50px;
+  right: -60px;
+  width: 250px;
+  height: 250px;
+  background: #f4b400;
+  border-radius: 50% 40% 60% 50% / 60% 50% 40% 50%;
+  filter: blur(30px);
+  animation: blob 10s infinite ease-in-out;
+  z-index: 1;
+}
+
+@keyframes blob {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1) translateY(-10px);
+  }
+}
