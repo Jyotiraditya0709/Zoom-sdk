@@ -36,6 +36,32 @@ video {
   border-radius: 16px;
 }
 
+.loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 10;
+}
+
+.error {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  background: rgba(220, 53, 69, 0.9);
+  color: white;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 10;
+}
+
 .controls {
   display: flex;
   flex-direction: column;
@@ -66,8 +92,30 @@ button {
   font-weight: 500;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   background-color: #1664c0;
+}
+
+button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.test-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.test-controls button {
+  flex: 1;
+  font-size: 14px;
+  padding: 8px 12px;
+  background: #6c757d;
+}
+
+.test-controls button:hover:not(:disabled) {
+  background: #5a6268;
 }
 
 .join-button {
@@ -81,6 +129,11 @@ button:hover {
   border-radius: 24px;
   cursor: pointer;
 }
+
+.join-button:hover:not(:disabled) {
+  background: linear-gradient(to right, #00a047, #e55a00);
+}
+
 .preview-canvas {
   position: relative;
   width: 480px;

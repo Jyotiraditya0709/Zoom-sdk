@@ -2,143 +2,296 @@ import React, { useEffect, useState, useRef } from "react";
 import ZoomVideo from "@zoom/videosdk";
 import { useNavigate } from "react-router-dom";
 import "./Preview.css";
-const VirtualBackgroundType = ZoomVideo;
+import { useZoom } from "./ZoomContext";
+
+// Persistent tracks (module-level, not per-render)
+let localVideoTrack = null;
+let localAudioTrack = null;
 
 const Preview = () => {
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const navigate = useNavigate();
+  const {
+    selectedCamera,
+    setSelectedCamera,
+    selectedMic,
+    setSelectedMic,
+    selectedSpeaker,
+    setSelectedSpeaker,
+    userName,
+    setUserName,
+    sessionName,
+    setSessionName,
+    cleanup: contextCleanup,
+  } = useZoom();
 
   // ========== State for selected options ==========
   const [videoDevices, setVideoDevices] = useState([]);
-  const [audioDevices, setAudioDevices] = useState([]);
+  const [audioDevices, setAudioDevices] = useState([]); // mic array
   const [speakerDevices, setSpeakerDevices] = useState([]);
-  const [selectedCamera, setSelectedCamera] = useState("");
-  const [selectedMic, setSelectedMic] = useState("");
-  const [selectedSpeaker, setSelectedSpeaker] = useState("");
   const [bgMode, setBgMode] = useState("none");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [isMicTesting, setIsMicTesting] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [micTestPhase, setMicTestPhase] = useState("idle"); // idle | recording | playing
+  const [micTestPlaybackTimeout, setMicTestPlaybackTimeout] = useState(null);
+  const [micTestPlaybackWarning, setMicTestPlaybackWarning] = useState("");
+  const microPhoneTesterRef = useRef(null);
 
   const client = useRef(null);
-  const localVideoTrack = useRef(null);
-  const localAudioTrack = useRef(null);
 
   //========== Fetch Devices on Mount ==========
   useEffect(() => {
     const fetchDevices = async () => {
-      const devices = await ZoomVideo.getDevices();
-      const cams = devices.filter((d) => d.kind === "videoinput");
-      const mics = devices.filter((d) => d.kind == "audioinput");
-      const speakers = devices.filter((d) => d.kind === "audiooutput");
+      try {
+        const devices = await ZoomVideo.getDevices();
+        const cams = devices.filter((d) => d.kind === "videoinput");
+        const mics = devices.filter((d) => d.kind === "audioinput");
+        const speakers = devices.filter((d) => d.kind === "audiooutput");
 
-      setVideoDevices(cams);
-      setAudioDevices(mics);
-      setSpeakerDevices(speakers);
-      setSelectedCamera(cams[0]?.deviceId);
-      setSelectedMic(mics[0]?.deviceId);
-      setSelectedSpeaker(speakers[0]?.deviceId);
+        setVideoDevices(cams);
+        setAudioDevices(mics);
+        setSpeakerDevices(speakers);
+        setSelectedCamera(cams[0]?.deviceId || "");
+        setSelectedMic(mics[0]?.deviceId || "");
+        setSelectedSpeaker(speakers[0]?.deviceId || "");
+      } catch (err) {
+        console.error("Error fetching devices:", err);
+        setError(
+          "Failed to fetch devices. Please check your camera and microphone permissions."
+        );
+      }
     };
-
     fetchDevices();
   }, []);
 
-  // ========== Start Preview Camera and Mic with Optional Background ==========
+  // ========== Cleanup function ==========
+  // Removed duplicate cleanup, use contextCleanup instead
+
+  // ========== Start Preview Camera and Mic ==========
   const startPreview = async () => {
-    client.current = ZoomVideo.createClient();
-
-    await client.current.init("en-US", "Global", { patchJsMedia: true });
-
-    //create and store local vid/aud tracks
-    localVideoTrack.current = ZoomVideo.createLocalVideoTrack(selectedCamera);
-    if (bgMode === "blur") {
-      await localVideoTrack.current.start(videoRef.current, {
+    setIsLoading(true);
+    setError("");
+    try {
+      await contextCleanup();
+      client.current = ZoomVideo.createClient();
+      await client.current.init("en-US", "Global", {
+        patchJsMedia: true,
         virtualBackground: {
-          type: ZoomVideo.VirtualBackgroundType.Blur,
+          isSupport: true,
+          resources: {
+            dir: "/lib",
+          },
         },
       });
-    } else if (bgMode === "image") {
-      await localVideoTrack.current.start(videoRef.current, {
-        virtualBackground: {
-          type: ZoomVideo.VirtualBackgroundType.Image,
-          source: "url-to-your-image.jpg", // or imported image path
-        },
-      });
-    } else {
-      await localVideoTrack.current.start(videoRef.current);
+      // Create and start video track
+      if (!localVideoTrack) {
+        localVideoTrack = ZoomVideo.createLocalVideoTrack(selectedCamera);
+      }
+      if (bgMode === "none") {
+        await localVideoTrack.start(videoRef.current);
+        await localVideoTrack.updateVirtualBackground(undefined);
+      } else if (bgMode === "blur") {
+        await localVideoTrack.start(canvasRef.current, { imageUrl: "blur" });
+      } else if (bgMode === "image") {
+        await localVideoTrack.start(canvasRef.current, {
+          imageUrl: "/lib/vb-resource/background.jpg",
+        });
+      }
+      // Create and start audio track
+      if (!localAudioTrack) {
+        localAudioTrack = ZoomVideo.createLocalAudioTrack(selectedMic);
+      }
+      await localAudioTrack.start();
+      await localAudioTrack.unmute();
+    } catch (err) {
+      if (err.name === "NotReadableError") {
+        setError(
+          "Camera or microphone is already in use by another application. Please close other apps and try again."
+        );
+      } else {
+        setError("Failed to start preview: " + (err.reason || err.message));
+      }
+    } finally {
+      setIsLoading(false);
     }
-
-    localAudioTrack.current = ZoomVideo.createLocalAudioTrack(selectedMic);
-
-    await localAudioTrack.current.start();
-    await localAudioTrack.current.unmute();
   };
+
+  // ========== Update Virtual Background on Change ==========
+  useEffect(() => {
+    const updateVB = async () => {
+      if (!localVideoTrack) return;
+      try {
+        console.log("Updating VB to", bgMode);
+        if (bgMode === "none") {
+          await localVideoTrack.stop();
+          await localVideoTrack.start(videoRef.current);
+          await localVideoTrack.updateVirtualBackground(undefined);
+        } else if (bgMode === "blur") {
+          await localVideoTrack.stop();
+          await localVideoTrack.start(canvasRef.current, { imageUrl: "blur" });
+        } else if (bgMode === "image") {
+          await localVideoTrack.stop();
+          await localVideoTrack.start(canvasRef.current, {
+            imageUrl: "/lib/vb-resource/background.jpg",
+          });
+        }
+      } catch (err) {
+        console.error("Error updating virtual background:", err);
+        setError("Failed to update virtual background.");
+      }
+    };
+    updateVB();
+  }, [bgMode]);
 
   useEffect(() => {
     if (selectedCamera && selectedMic) {
       startPreview();
     }
-  }, [selectedCamera, selectedMic, bgMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCamera, selectedMic]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      contextCleanup();
+    };
+  }, []);
 
   // ========== Join Meeting Handler ==========
-  const handleJoin = () => {
-    navigate("/meeting", {
-      state: {
-        client: client.current,
-        camera: selectedCamera,
-        mic: selectedMic,
-        speaker: selectedSpeaker,
-      },
-    });
+  const handleJoin = async () => {
+    await contextCleanup();
+    navigate("/meeting");
   };
+
   // ========== Mic Testing Feature ==========
-  let microPhoneTester;
   const handleMicTest = () => {
-    const levelElm = document.querySelector("#mic-input-level");
-    if (microPhoneTester) {
-      microPhoneTester.stop();
-      microPhoneTester = null;
+    if (!localAudioTrack) {
+      setError("Please start preview first");
       return;
     }
-
-    //volume level monitoring
-    microPhoneTester = localAudioTrack.current.testMicrophone({
-      microphoneId: selectedMic,
-      speakerId: selectedSpeaker,
-      recordAndPlay: true,
-      onAnalyseFrequency: (v) => {
-        levelElm.value = v;
-      },
-      onStartRecording: () => {},
-      onStartPlayRecording: () => {},
-      onStopPlayRecording: () => {
-        microPhoneTester = null;
-      },
-    });
+    if (microPhoneTesterRef.current) {
+      microPhoneTesterRef.current.stop();
+      microPhoneTesterRef.current = null;
+      setIsMicTesting(false);
+      setMicLevel(0);
+      setMicTestPhase("idle");
+      setMicTestPlaybackWarning("");
+      if (micTestPlaybackTimeout) {
+        clearTimeout(micTestPlaybackTimeout);
+        setMicTestPlaybackTimeout(null);
+      }
+      return;
+    }
+    try {
+      setIsMicTesting(true);
+      setMicTestPhase("recording");
+      setMicTestPlaybackWarning("");
+      microPhoneTesterRef.current = localAudioTrack.testMicrophone({
+        microphoneId: selectedMic,
+        speakerId: selectedSpeaker,
+        recordAndPlay: true,
+        onAnalyseFrequency: (v) => {
+          setMicLevel(Math.round(v * 100));
+        },
+        onStartRecording: () => {
+          console.log("Mic test: onStartRecording");
+          setMicTestPhase("recording");
+        },
+        onStartPlayRecording: () => {
+          console.log("Mic test: onStartPlayRecording");
+          setMicTestPhase("playing");
+          if (micTestPlaybackTimeout) {
+            clearTimeout(micTestPlaybackTimeout);
+            setMicTestPlaybackTimeout(null);
+          }
+        },
+        onStopPlayRecording: () => {
+          console.log("Mic test: onStopPlayRecording");
+          microPhoneTesterRef.current = null;
+          setIsMicTesting(false);
+          setMicLevel(0);
+          setMicTestPhase("idle");
+          setMicTestPlaybackWarning("");
+          if (micTestPlaybackTimeout) {
+            clearTimeout(micTestPlaybackTimeout);
+            setMicTestPlaybackTimeout(null);
+          }
+        },
+      });
+      // Fallback: if playback doesn't start after 5 seconds, show warning
+      const timeout = setTimeout(() => {
+        if (micTestPhase === "recording") {
+          setMicTestPlaybackWarning(
+            "Playback not supported in this environment or browser. You may not hear your recording."
+          );
+        }
+      }, 5000);
+      setMicTestPlaybackTimeout(timeout);
+    } catch (err) {
+      console.error("Error testing microphone:", err);
+      setError("Failed to test microphone");
+      setIsMicTesting(false);
+      setMicLevel(0);
+      setMicTestPhase("idle");
+      setMicTestPlaybackWarning("");
+      if (micTestPlaybackTimeout) {
+        clearTimeout(micTestPlaybackTimeout);
+        setMicTestPlaybackTimeout(null);
+      }
+    }
   };
 
   // ========== Speaker Test ==========
   let speakerTester;
   const handleSpeakerTest = () => {
+    if (!localAudioTrack) {
+      setError("Please start preview first");
+      return;
+    }
     const levelElm = document.querySelector("#speaker-output-level");
-
-    //if running, destroy
     if (speakerTester) {
       speakerTester.destroy();
       speakerTester = null;
       return;
     }
-
-    speakerTester = localAudioTrack.current.testSpeaker({
-      speakerId: selectedSpeaker,
-      onAnalyseFrequency: (v) => {
-        levelElm.value = v;
-      },
-    });
+    try {
+      speakerTester = localAudioTrack.testSpeaker({
+        speakerId: selectedSpeaker,
+        onAnalyseFrequency: (v) => {
+          if (levelElm) levelElm.value = v;
+        },
+      });
+    } catch (err) {
+      console.error("Error testing speaker:", err);
+      setError("Failed to test speaker");
+    }
   };
 
   return (
     <div className="preview-page">
       <div className="preview-container">
         <div className="video-preview">
-          <video ref={videoRef} autoPlay muted playsInline></video>
+          {bgMode === "none" ? (
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{ width: "100%", height: "100%", background: "black" }}
+            ></video>
+          ) : (
+            <canvas
+              ref={canvasRef}
+              width={1280}
+              height={720}
+              style={{ width: "100%", height: "100%", background: "black" }}
+            />
+          )}
+          {isLoading && <div className="loading">Starting preview...</div>}
+          {error && <div className="error">{error}</div>}
         </div>
 
         <div className="controls">
@@ -195,8 +348,36 @@ const Preview = () => {
             </select>
           </label>
 
-          <button className="join-button" onClick={handleJoin}>
-            Ask to join
+          <div className="test-controls">
+            <button onClick={handleMicTest}>
+              {micTestPhase === "recording"
+                ? "Recording..."
+                : micTestPhase === "playing"
+                  ? "Playing..."
+                  : isMicTesting
+                    ? "Stop"
+                    : "Test Microphone"}
+            </button>
+            <button onClick={handleSpeakerTest}>Test Speaker</button>
+          </div>
+          <progress
+            id="mic-input-level"
+            value={micLevel}
+            max={100}
+            style={{ width: "100%", marginTop: 8 }}
+          ></progress>
+          {micTestPlaybackWarning && (
+            <div style={{ color: "orange", marginTop: 4 }}>
+              {micTestPlaybackWarning}
+            </div>
+          )}
+
+          <button
+            className="join-button"
+            onClick={handleJoin}
+            disabled={isLoading || !selectedCamera || !selectedMic}
+          >
+            {isLoading ? "Starting..." : "Join Session"}
           </button>
         </div>
       </div>
