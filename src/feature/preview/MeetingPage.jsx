@@ -1,6 +1,55 @@
+// MeetingPage.jsx (Updated with Proper Screen Sharing)
 import React, { useEffect, useRef, useState } from "react";
-import { useZoom } from "./ZoomContext";
+import { useZoom } from "../preview/ZoomContext";
 import axios from "axios";
+import "./MeetingPage.css";
+import {
+  FaMicrophone,
+  FaMicrophoneSlash,
+  FaVideo,
+  FaVideoSlash,
+  FaUsers,
+  FaCommentDots,
+  FaDesktop,
+  FaInfoCircle,
+  FaSignOutAlt,
+} from "react-icons/fa";
+import ZoomVideo from "@zoom/videosdk";
+
+// Helper functions for robust device fallback
+async function createSafeLocalVideoTrack(selectedCamera) {
+  try {
+    return await ZoomVideo.createLocalVideoTrack({
+      cameraId: selectedCamera?.deviceId,
+    });
+  } catch (err) {
+    if (err.name === "OverconstrainedError" || err.name === "NotFoundError") {
+      return await ZoomVideo.createLocalVideoTrack();
+    }
+    throw err;
+  }
+}
+
+async function createSafeLocalAudioTrack(selectedMic) {
+  try {
+    return await ZoomVideo.createLocalAudioTrack({
+      microphoneId: selectedMic?.deviceId,
+    });
+  } catch (err) {
+    if (err.name === "OverconstrainedError" || err.name === "NotFoundError") {
+      return await ZoomVideo.createLocalAudioTrack();
+    }
+    throw err;
+  }
+}
+
+// Helper to get deviceId string
+function getDeviceId(device) {
+  if (!device) return undefined;
+  if (typeof device === "string") return device;
+  if (typeof device === "object" && device.deviceId) return device.deviceId;
+  return undefined;
+}
 
 const MeetingPage = () => {
   const {
@@ -11,62 +60,755 @@ const MeetingPage = () => {
     sessionName,
     cleanup,
   } = useZoom();
-  const videoRef = useRef(null);
   const [error, setError] = useState("");
+  const [participants, setParticipants] = useState([]);
+  const [isAudioOn, setIsAudioOn] = useState(true);
+  const [isVideoOn, setIsVideoOn] = useState(true);
+  const clientRef = useRef(null);
+  const videoRefs = useRef({});
+  const localUserIdRef = useRef(null);
+  const [showParticipants, setShowParticipants] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isSharing, setIsSharing] = useState(false);
+  const shareVideoRef = useRef(null);
+  const shareCanvasRef = useRef(null);
+  const shareRenderVideoRef = useRef(null);
+  const localVideoTrackRef = useRef(null);
+  const localAudioTrackRef = useRef(null);
+  const [isJoining, setIsJoining] = useState(false);
+  const [localUser, setLocalUser] = useState(null);
+
+  let localVideoTrack = null;
+  let localAudioTrack = null;
 
   useEffect(() => {
-    const joinSession = async () => {
+    const getSignature = async () => {
       try {
-        const client = getClient();
-        await client.init("en-US", "Global", { patchJsMedia: true });
-
-        // Get signature from your backend
-        const res = await axios.post(
+        const response = await axios.post(
           "http://localhost:4000/generateSignature",
           {
             sessionName,
-            role: 1,
+            role: 1, // 1 = host, 0 = attendee
           }
         );
-        const signature = res.data.signature;
-
-        await client.join(sessionName, signature, userName);
-
-        // Start video/audio
-        const mediaStream = client.getMediaStream();
-        await mediaStream.startVideo();
-        await mediaStream.startAudio();
-
-        // Render local video using attachVideo
-        const userId = client.getCurrentUserInfo().userId;
-        mediaStream.attachVideo(videoRef.current, userId);
+        return response.data.signature;
       } catch (err) {
-        setError("Join failed: " + (err.reason || err.message));
+        console.error("Failed to get signature:", err);
+        throw new Error("Signature fetch failed");
+      }
+    };
+
+    const joinSession = async () => {
+      setIsJoining(true);
+      setError("");
+
+      try {
+        const client = ZoomVideo.createClient();
+        await client.init("en-US", "Global", {
+          patchJsMedia: true,
+          virtualBackground: {
+            isSupport: true,
+          },
+        });
+
+        // Save client to ref
+        clientRef.current = client;
+
+        const token = await getSignature();
+        await client.join(sessionName, token, userName);
+
+        const myUser = client.getCurrentUserInfo();
+        localUserIdRef.current = myUser.userId;
+        setParticipants([myUser]);
+        setLocalUser(myUser);
+
+        // Clean up any previous tracks
+        if (localVideoTrack) {
+          await localVideoTrack.stop();
+          localVideoTrack = null;
+        }
+        if (localAudioTrack) {
+          await localAudioTrack.stop();
+          localAudioTrack = null;
+        }
+
+        // Get deviceId strings
+        const cameraId = getDeviceId(selectedCamera);
+        const micId = getDeviceId(selectedMic);
+
+        // Create and start local video track
+        if (cameraId) {
+          localVideoTrack = await ZoomVideo.createLocalVideoTrack(cameraId);
+        } else {
+          localVideoTrack = await ZoomVideo.createLocalVideoTrack();
+        }
+        const el = videoRefs.current[myUser.userId];
+        if (el) {
+          await localVideoTrack.start(el);
+        } else {
+          setTimeout(async () => {
+            const el2 = videoRefs.current[myUser.userId];
+            if (el2) await localVideoTrack.start(el2);
+          }, 300);
+        }
+
+        // Create and start local audio track
+        if (micId) {
+          localAudioTrack = await ZoomVideo.createLocalAudioTrack(micId);
+        } else {
+          localAudioTrack = await ZoomVideo.createLocalAudioTrack();
+        }
+        await localAudioTrack.start();
+        await localAudioTrack.unmute();
+
+        setIsVideoOn(true);
+        setIsAudioOn(true);
+
+        client.on("user-added", (users) => {
+          setParticipants((prev) => [...prev, ...users]);
+        });
+
+        client.on("user-removed", (users) => {
+          setParticipants((prev) =>
+            prev.filter((u) => !users.find((r) => r.userId === u.userId))
+          );
+        });
+
+        // Screen sharing event handlers
+        client.on("share-content-received", ({ userId }) => {
+          if (shareVideoRef.current) {
+            client
+              .getMediaStream()
+              .renderShare(shareVideoRef.current, userId, 1280, 720, 0, 0);
+          }
+        });
+
+        // Handle passive stop share
+        client.on("passively-stop-share", () => {
+          setIsSharing(false);
+          if (shareRenderVideoRef.current)
+            shareRenderVideoRef.current.style.display = "none";
+          if (shareCanvasRef.current)
+            shareCanvasRef.current.style.display = "none";
+        });
+      } catch (err) {
+        console.error("Join error:", err);
+        setError("Failed to join session: " + (err.reason || err.message));
+      } finally {
+        setIsJoining(false);
       }
     };
 
     joinSession();
     return () => {
+      if (localVideoTrack) {
+        localVideoTrack.stop();
+        localVideoTrack = null;
+      }
+      if (localAudioTrack) {
+        localAudioTrack.stop();
+        localAudioTrack = null;
+      }
       cleanup();
     };
-  }, [getClient, sessionName, userName, cleanup]);
+  }, [getClient, sessionName, userName, cleanup, selectedCamera]);
+
+  // Effect to start video when both track and ref are ready
+  useEffect(() => {
+    if (localUser && localVideoTrack && videoRefs.current[localUser.userId]) {
+      localVideoTrack
+        .start(videoRefs.current[localUser.userId])
+        .catch((err) => {
+          setError(
+            "Failed to start local video: " + (err.reason || err.message)
+          );
+        });
+    }
+  }, [localUser, localVideoTrack, videoRefs]);
+
+  // Screen sharing event listeners
+  useEffect(() => {
+    if (!clientRef.current) return;
+    const mediaStream = clientRef.current.getMediaStream();
+    const handleShareStarted = () => setIsSharing(true);
+    const handleShareStopped = () => {
+      setIsSharing(false);
+      if (shareRenderVideoRef.current)
+        shareRenderVideoRef.current.style.display = "none";
+      if (shareCanvasRef.current) shareCanvasRef.current.style.display = "none";
+    };
+    const handleShareReceived = ({ userId }) => {
+      if (shareVideoRef.current) {
+        mediaStream.renderShare(shareVideoRef.current, userId, 1280, 720, 0, 0);
+      }
+    };
+    mediaStream.on("share-content-started", handleShareStarted);
+    mediaStream.on("share-content-stopped", handleShareStopped);
+    mediaStream.on("share-content-received", handleShareReceived);
+    return () => {
+      mediaStream.off("share-content-started", handleShareStarted);
+      mediaStream.off("share-content-stopped", handleShareStopped);
+      mediaStream.off("share-content-received", handleShareReceived);
+    };
+  }, [clientRef, shareVideoRef]);
+
+  // Start screen sharing with proper browser compatibility
+  const startScreenShare = async () => {
+    try {
+      const mediaStream = clientRef.current.getMediaStream();
+      if (mediaStream.isStartShareScreenWithVideoElement()) {
+        await mediaStream.startShareScreen(shareRenderVideoRef.current);
+        shareRenderVideoRef.current.style.display = "block";
+      } else {
+        await mediaStream.startShareScreen(shareCanvasRef.current);
+        shareCanvasRef.current.style.display = "block";
+      }
+      setIsSharing(true);
+      setShowShare(false);
+    } catch (err) {
+      setError(
+        "Failed to start screen sharing: " + (err.reason || err.message)
+      );
+    }
+  };
+
+  // Stop screen sharing
+  const stopScreenShare = async () => {
+    try {
+      await clientRef.current.getMediaStream().stopShareScreen();
+      if (shareRenderVideoRef.current)
+        shareRenderVideoRef.current.style.display = "none";
+      if (shareCanvasRef.current) shareCanvasRef.current.style.display = "none";
+      setIsSharing(false);
+      setShowShare(false);
+    } catch (err) {
+      setError("Failed to stop screen sharing: " + (err.reason || err.message));
+    }
+  };
+
+  // Mic toggle logic
+  const toggleAudio = async () => {
+    try {
+      if (!localAudioTrack) return;
+      if (isAudioOn) {
+        await localAudioTrack.mute();
+      } else {
+        await localAudioTrack.unmute();
+      }
+      setIsAudioOn((v) => !v);
+    } catch (err) {
+      setError("Audio toggle failed: " + (err?.message || err?.name || err));
+    }
+  };
+
+  // Video toggle logic
+  const toggleVideo = async () => {
+    try {
+      const currentUserId = localUserIdRef.current;
+      const videoEl = videoRefs.current[currentUserId];
+      const cameraId = getDeviceId(selectedCamera);
+      if (isVideoOn) {
+        if (localVideoTrack) {
+          await localVideoTrack.stop();
+        }
+      } else {
+        if (cameraId) {
+          localVideoTrack = await ZoomVideo.createLocalVideoTrack(cameraId);
+        } else {
+          localVideoTrack = await ZoomVideo.createLocalVideoTrack();
+        }
+        if (videoEl) {
+          await localVideoTrack.start(videoEl);
+        }
+      }
+      setIsVideoOn((v) => !v);
+    } catch (err) {
+      setError("Video toggle failed: " + (err?.message || err?.name || err));
+    }
+  };
+
+  const leaveSession = async () => {
+    await cleanup();
+    window.location.href = "/feedback";
+  };
+
+  const sendChatMessage = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    try {
+      const client = clientRef.current;
+      const chatClient = client.getChatClient();
+      await chatClient.sendToAll(chatInput);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          sender: userName,
+          content: chatInput,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+      ]);
+      setChatInput("");
+    } catch (err) {
+      setError("Failed to send message");
+    }
+  };
+
+  // Modal overlay click handler
+  const handleOverlayClick = (closeFn) => (e) => {
+    if (e.target.classList.contains("modal")) closeFn();
+  };
 
   return (
-    <div className="app-container">
-      <h2>Meeting Room</h2>
-      {error && <div className="error-box">{error}</div>}
-      <div className="local-preview-container">
-        <video
-          id="meeting-video"
-          ref={videoRef}
-          width={640}
-          height={360}
-          autoPlay
-          muted
-          playsInline
-          style={{ background: "black", borderRadius: "12px" }}
-        />
+    <div className="meeting-container">
+      <div className="top-bar">Zoom Meeting - {sessionName}</div>
+
+      {/* Shared screen elements (for both sharer and viewer) */}
+      {isSharing && (
+        <div
+          style={{
+            width: "100%",
+            display: "flex",
+            justifyContent: "center",
+            margin: "16px 0",
+          }}
+        >
+          {/* Video element for screen sharing (when browser supports it) */}
+          <video
+            ref={shareRenderVideoRef}
+            autoPlay
+            playsInline
+            id="my-screen-share-content-video"
+            style={{
+              display: "none",
+              maxWidth: "90vw",
+              maxHeight: "60vh",
+              borderRadius: 12,
+              boxShadow: "0 2px 16px rgba(0,0,0,0.2)",
+            }}
+          />
+          {/* Canvas element for screen sharing (fallback) */}
+          <canvas
+            ref={shareCanvasRef}
+            id="my-screen-share-content-canvas"
+            height={720}
+            width={1280}
+            style={{
+              display: "none",
+              maxWidth: "90vw",
+              maxHeight: "60vh",
+              borderRadius: 12,
+              boxShadow: "0 2px 16px rgba(0,0,0,0.2)",
+            }}
+          ></canvas>
+          {/* Video element for viewing other users' shared content */}
+          <video
+            ref={shareVideoRef}
+            autoPlay
+            playsInline
+            style={{
+              maxWidth: "90vw",
+              maxHeight: "60vh",
+              borderRadius: 12,
+              boxShadow: "0 2px 16px rgba(0,0,0,0.2)",
+            }}
+          />
+        </div>
+      )}
+
+      <div className="video-grid">
+        {participants.map((user) => (
+          <div className="video-tile" key={user.userId}>
+            <video
+              ref={(el) => (videoRefs.current[user.userId] = el)}
+              autoPlay
+              muted={user.userId === localUserIdRef.current}
+              playsInline
+              className="video-element"
+              style={{ background: "black", width: "100%", height: "100%" }}
+            />
+            {/* Show error if local video fails */}
+            {user.userId === localUserIdRef.current && error && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  color: "#fff",
+                  background: "rgba(0,0,0,0.7)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 18,
+                  zIndex: 2,
+                  textAlign: "center",
+                  padding: 16,
+                }}
+              >
+                {error}
+              </div>
+            )}
+            <div className="user-label">{user.displayName}</div>
+          </div>
+        ))}
       </div>
+
+      <div className="control-bar">
+        <button
+          className="control-button"
+          onClick={toggleAudio}
+          title={isAudioOn ? "Mute" : "Unmute"}
+        >
+          {isAudioOn ? (
+            <FaMicrophone size={22} />
+          ) : (
+            <FaMicrophoneSlash size={22} />
+          )}
+          <div className="control-label">{isAudioOn ? "Mute" : "Unmute"}</div>
+        </button>
+        <button
+          className="control-button"
+          onClick={toggleVideo}
+          title={isVideoOn ? "Stop Video" : "Start Video"}
+        >
+          {isVideoOn ? <FaVideo size={22} /> : <FaVideoSlash size={22} />}
+          <div className="control-label">
+            {isVideoOn ? "Stop Video" : "Start Video"}
+          </div>
+        </button>
+        <button
+          className="control-button"
+          onClick={() => setShowParticipants(true)}
+          title="Participants"
+        >
+          <FaUsers size={22} />
+          <div className="control-label">Participants</div>
+        </button>
+        <button
+          className="control-button"
+          onClick={() => setShowChat(true)}
+          title="Chat"
+        >
+          <FaCommentDots size={22} />
+          <div className="control-label">Chat</div>
+        </button>
+        <button
+          className="control-button"
+          onClick={() => setShowInfo(true)}
+          title="Info"
+        >
+          <FaInfoCircle size={22} />
+          <div className="control-label">Info</div>
+        </button>
+        <button
+          className="control-button"
+          onClick={() => setShowShare(true)}
+          title="Share"
+        >
+          <FaDesktop size={22} />
+          <div className="control-label">Share</div>
+        </button>
+        <button
+          className="control-button leave"
+          onClick={leaveSession}
+          title="Leave"
+        >
+          <FaSignOutAlt size={22} />
+          <div className="control-label">Leave</div>
+        </button>
+        {isSharing && (
+          <span style={{ color: "#00baff", fontWeight: 600, marginLeft: 16 }}>
+            Screen sharing active
+          </span>
+        )}
+      </div>
+
+      {/* Participants Sidebar */}
+      {showParticipants && (
+        <div
+          className="modal"
+          onClick={handleOverlayClick(() => setShowParticipants(false))}
+        >
+          <div
+            style={{
+              background: "#fff",
+              color: "#222",
+              width: 320,
+              height: "100vh",
+              padding: 24,
+              borderTopLeftRadius: 16,
+              borderBottomLeftRadius: 16,
+              boxShadow: "-2px 0 12px rgba(0,0,0,0.15)",
+              position: "relative",
+            }}
+          >
+            <button
+              onClick={() => setShowParticipants(false)}
+              style={{
+                position: "absolute",
+                top: 16,
+                right: 16,
+                background: "none",
+                border: "none",
+                fontSize: 22,
+                cursor: "pointer",
+              }}
+            >
+              ×
+            </button>
+            <h3 style={{ marginTop: 0 }}>
+              Participants ({participants.length})
+            </h3>
+            <ul style={{ listStyle: "none", padding: 0 }}>
+              {participants.map((user) => (
+                <li
+                  key={user.userId}
+                  style={{
+                    margin: "16px 0",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>{user.displayName}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* Chat Modal */}
+      {showChat && (
+        <div
+          className="modal"
+          onClick={handleOverlayClick(() => setShowChat(false))}
+        >
+          <div
+            style={{
+              background: "#fff",
+              color: "#222",
+              width: 400,
+              maxHeight: 600,
+              borderRadius: 16,
+              boxShadow: "0 2px 16px rgba(0,0,0,0.2)",
+              padding: 0,
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                padding: 16,
+                borderBottom: "1px solid #eee",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <h3 style={{ margin: 0 }}>Chat</h3>
+              <button
+                onClick={() => setShowChat(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 22,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: 16,
+                background: "#f7f7f7",
+              }}
+            >
+              {chatMessages.map((msg, idx) => (
+                <div key={idx} style={{ marginBottom: 12 }}>
+                  <span style={{ fontWeight: 600 }}>{msg.sender}</span>
+                  <span style={{ color: "#888", fontSize: 12, marginLeft: 8 }}>
+                    {msg.timestamp}
+                  </span>
+                  <div style={{ marginTop: 2 }}>{msg.content}</div>
+                </div>
+              ))}
+            </div>
+            <form
+              onSubmit={sendChatMessage}
+              style={{
+                display: "flex",
+                borderTop: "1px solid #eee",
+                padding: 12,
+                background: "#fafafa",
+                borderBottomRightRadius: 16,
+                borderBottomLeftRadius: 16,
+              }}
+            >
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Type a message..."
+                style={{
+                  flex: 1,
+                  border: "1px solid #ccc",
+                  borderRadius: 8,
+                  padding: 8,
+                  fontSize: 15,
+                }}
+              />
+              <button
+                type="submit"
+                style={{
+                  marginLeft: 8,
+                  background: "#00baff",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "8px 16px",
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: "pointer",
+                }}
+              >
+                Send
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Share Modal */}
+      {showShare && (
+        <div
+          className="modal"
+          onClick={handleOverlayClick(() => setShowShare(false))}
+        >
+          <div
+            style={{
+              background: "#fff",
+              color: "#222",
+              width: 340,
+              borderRadius: 16,
+              boxShadow: "0 2px 16px rgba(0,0,0,0.2)",
+              padding: 32,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+            }}
+          >
+            <button
+              onClick={() => setShowShare(false)}
+              style={{
+                position: "absolute",
+                top: 16,
+                right: 16,
+                background: "none",
+                border: "none",
+                fontSize: 22,
+                cursor: "pointer",
+              }}
+            >
+              ×
+            </button>
+            <h3 style={{ marginTop: 0 }}>Screen Sharing</h3>
+            {!isSharing ? (
+              <button
+                onClick={startScreenShare}
+                style={{
+                  marginTop: 24,
+                  background: "#00baff",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "12px 24px",
+                  fontWeight: 600,
+                  fontSize: 16,
+                  cursor: "pointer",
+                }}
+              >
+                Start Sharing
+              </button>
+            ) : (
+              <button
+                onClick={stopScreenShare}
+                style={{
+                  marginTop: 24,
+                  background: "#ff4b5c",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "12px 24px",
+                  fontWeight: 600,
+                  fontSize: 16,
+                  cursor: "pointer",
+                }}
+              >
+                Stop Sharing
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Info Modal */}
+      {showInfo && (
+        <div
+          className="modal"
+          onClick={handleOverlayClick(() => setShowInfo(false))}
+        >
+          <div
+            style={{
+              background: "#fff",
+              color: "#222",
+              width: 340,
+              borderRadius: 16,
+              boxShadow: "0 2px 16px rgba(0,0,0,0.2)",
+              padding: 32,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+            }}
+          >
+            <button
+              onClick={() => setShowInfo(false)}
+              style={{
+                position: "absolute",
+                top: 16,
+                right: 16,
+                background: "none",
+                border: "none",
+                fontSize: 22,
+                cursor: "pointer",
+              }}
+            >
+              ×
+            </button>
+            <h3 style={{ marginTop: 0 }}>Meeting Info</h3>
+            <div style={{ marginTop: 16, width: "100%" }}>
+              <div>
+                <strong>Session:</strong> {sessionName}
+              </div>
+              <div>
+                <strong>Your Name:</strong> {userName}
+              </div>
+              <div>
+                <strong>Participants:</strong> {participants.length}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {error && <div className="error-box">{error}</div>}
     </div>
   );
 };

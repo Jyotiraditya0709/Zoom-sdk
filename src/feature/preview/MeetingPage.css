@@ -1,0 +1,192 @@
+/* --- Main Layout --- */
+.meeting-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background-color: #2d2d2d;
+  color: white;
+  padding-bottom: 80px; /* space for control bar */
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.top-bar {
+  padding: 12px 20px;
+  background-color: #1c1c1c;
+  font-size: 18px;
+  border-bottom: 1px solid #444;
+  letter-spacing: 0.01em;
+}
+
+/* --- Video Grid --- */
+.video-grid {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.video-tile {
+  position: relative;
+  width: 300px;
+  height: 200px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.video-element {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.user-label {
+  position: absolute;
+  bottom: 8px;
+  left: 12px;
+  color: white;
+  font-weight: bold;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.error-box {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ff4b5c;
+  color: white;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: bold;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 2000;
+  animation: fadeInOut 5s ease-in-out;
+}
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  10%,
+  90% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px);
+  }
+}
+
+/* --- Control Bar --- */
+.control-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 18px 0;
+  background-color: #1c1c1c;
+  border-top: 1px solid #444;
+  gap: 32px;
+  width: 100%;
+  box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.12);
+}
+
+.control-button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 8px 18px 4px 18px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition:
+    background 0.2s,
+    color 0.2s;
+  position: relative;
+  min-width: 64px;
+}
+
+.control-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #00baff;
+}
+
+.control-label {
+  font-size: 12px;
+  margin-top: 4px;
+  color: #e0e0e0;
+  letter-spacing: 0.01em;
+}
+
+.control-button.leave {
+  background-color: #ff4b5c;
+  color: white;
+  font-weight: bold;
+  border-radius: 10px;
+  margin-left: 32px;
+  box-shadow: 0 2px 8px rgba(255, 75, 92, 0.15);
+}
+
+.control-button.leave:hover {
+  background-color: #e60026;
+  color: #fff;
+}
+
+/* --- Modals --- */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  font-size: 20px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.modal h3 {
+  margin: 0;
+}
+
+.modal button.close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+/* --- Shared screen canvas (optional) --- */
+canvas {
+  max-width: 100%;
+  border-radius: 12px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.2);
+}

@@ -81,9 +81,9 @@ const Preview = () => {
         patchJsMedia: true,
         virtualBackground: {
           isSupport: true,
-          resources: {
-            dir: "/lib",
-          },
+          // resources: {
+          //   dir: "/lib",
+          // },
         },
       });
       // Create and start video track
@@ -163,6 +163,8 @@ const Preview = () => {
   // ========== Join Meeting Handler ==========
   const handleJoin = async () => {
     await contextCleanup();
+    localVideoTrack = null;
+    localAudioTrack = null;
     navigate("/meeting");
   };
 
