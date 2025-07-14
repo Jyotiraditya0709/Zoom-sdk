@@ -51,6 +51,33 @@ function getDeviceId(device) {
   return undefined;
 }
 
+// Utility to safely start a video track with retries and error suppression
+async function safeStartVideoTrack(track, videoEl, retries = 3, delay = 300) {
+  if (!track || !videoEl) return;
+  try {
+    videoEl.srcObject = null;
+    if (videoEl.load) videoEl.load();
+  } catch {}
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await new Promise((res) => setTimeout(res, delay));
+      await track.start(videoEl);
+      return;
+    } catch (err) {
+      const msg = err?.message || "";
+      if (
+        msg.includes("play() request was interrupted") ||
+        msg.includes("Timeout starting video source")
+      ) {
+        console.warn(`Attempt ${attempt} to start video failed:`, msg);
+        if (attempt === retries) throw err;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 const MeetingPage = () => {
   const {
     getClient,
@@ -81,9 +108,38 @@ const MeetingPage = () => {
   const localAudioTrackRef = useRef(null);
   const [isJoining, setIsJoining] = useState(false);
   const [localUser, setLocalUser] = useState(null);
+  const [isTogglingVideo, setIsTogglingVideo] = useState(false);
 
   let localVideoTrack = null;
   let localAudioTrack = null;
+
+  // Helper: Detect WebCodecs support
+  const webCodecsEnabled =
+    typeof window.MediaStreamTrackProcessor === "function";
+
+  // Utility: Clean up camera/video resources fully
+  async function cleanupCamera(userId) {
+    const track = localVideoTrackRef.current;
+    if (track) {
+      await track.stop();
+      const m = track.mediaStreamTrack;
+      if (m?.stop) m.stop();
+      // If Zoom SDK exposes a localMediaStream, stop all tracks
+      if (
+        track.mediaStream &&
+        typeof track.mediaStream.getTracks === "function"
+      ) {
+        track.mediaStream.getTracks().forEach((t) => t.stop());
+      }
+      localVideoTrackRef.current = null;
+    }
+    // Clean up the video element
+    const el = videoRefs.current[userId];
+    if (el) {
+      el.srcObject = null;
+      if (el.load) el.load();
+    }
+  }
 
   useEffect(() => {
     const getSignature = async () => {
@@ -127,13 +183,13 @@ const MeetingPage = () => {
         setLocalUser(myUser);
 
         // Clean up any previous tracks
-        if (localVideoTrack) {
-          await localVideoTrack.stop();
-          localVideoTrack = null;
+        if (localVideoTrackRef.current) {
+          await localVideoTrackRef.current.stop();
+          localVideoTrackRef.current = null;
         }
-        if (localAudioTrack) {
-          await localAudioTrack.stop();
-          localAudioTrack = null;
+        if (localAudioTrackRef.current) {
+          await localAudioTrackRef.current.stop();
+          localAudioTrackRef.current = null;
         }
 
         // Get deviceId strings
@@ -142,28 +198,30 @@ const MeetingPage = () => {
 
         // Create and start local video track
         if (cameraId) {
-          localVideoTrack = await ZoomVideo.createLocalVideoTrack(cameraId);
+          localVideoTrackRef.current =
+            await ZoomVideo.createLocalVideoTrack(cameraId);
         } else {
-          localVideoTrack = await ZoomVideo.createLocalVideoTrack();
+          localVideoTrackRef.current = await ZoomVideo.createLocalVideoTrack();
         }
         const el = videoRefs.current[myUser.userId];
         if (el) {
-          await localVideoTrack.start(el);
+          await localVideoTrackRef.current.start(el);
         } else {
           setTimeout(async () => {
             const el2 = videoRefs.current[myUser.userId];
-            if (el2) await localVideoTrack.start(el2);
+            if (el2) await localVideoTrackRef.current.start(el2);
           }, 300);
         }
 
         // Create and start local audio track
         if (micId) {
-          localAudioTrack = await ZoomVideo.createLocalAudioTrack(micId);
+          localAudioTrackRef.current =
+            await ZoomVideo.createLocalAudioTrack(micId);
         } else {
-          localAudioTrack = await ZoomVideo.createLocalAudioTrack();
+          localAudioTrackRef.current = await ZoomVideo.createLocalAudioTrack();
         }
-        await localAudioTrack.start();
-        await localAudioTrack.unmute();
+        await localAudioTrackRef.current.start();
+        await localAudioTrackRef.current.unmute();
 
         setIsVideoOn(true);
         setIsAudioOn(true);
@@ -205,13 +263,10 @@ const MeetingPage = () => {
 
     joinSession();
     return () => {
-      if (localVideoTrack) {
-        localVideoTrack.stop();
-        localVideoTrack = null;
-      }
-      if (localAudioTrack) {
-        localAudioTrack.stop();
-        localAudioTrack = null;
+      cleanupCamera(localUserIdRef.current);
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.stop();
+        localAudioTrackRef.current = null;
       }
       cleanup();
     };
@@ -219,16 +274,18 @@ const MeetingPage = () => {
 
   // Effect to start video when both track and ref are ready
   useEffect(() => {
-    if (localUser && localVideoTrack && videoRefs.current[localUser.userId]) {
-      localVideoTrack
-        .start(videoRefs.current[localUser.userId])
-        .catch((err) => {
-          setError(
-            "Failed to start local video: " + (err.reason || err.message)
-          );
-        });
-    }
-  }, [localUser, localVideoTrack, videoRefs]);
+    const tryStart = async () => {
+      try {
+        const el = videoRefs.current[localUser?.userId];
+        if (localVideoTrackRef.current && el) {
+          await safeStartVideoTrack(localVideoTrackRef.current, el);
+        }
+      } catch (err) {
+        setError("Failed to start local video: " + (err.reason || err.message));
+      }
+    };
+    tryStart();
+  }, [localUser]);
 
   // Screen sharing event listeners
   useEffect(() => {
@@ -241,31 +298,68 @@ const MeetingPage = () => {
         shareRenderVideoRef.current.style.display = "none";
       if (shareCanvasRef.current) shareCanvasRef.current.style.display = "none";
     };
+    // For viewers: always use canvas for incoming share
+    const handleActiveShareChange = ({ userId, state }) => {
+      if (!mediaStream) return;
+      if (state === "Active") {
+        if (shareCanvasRef.current) {
+          mediaStream.startShareView(shareCanvasRef.current, userId);
+          shareCanvasRef.current.style.display = "block";
+          if (shareRenderVideoRef.current)
+            shareRenderVideoRef.current.style.display = "none";
+        }
+        setIsSharing(true);
+      } else {
+        mediaStream.stopShareView();
+        setIsSharing(false);
+        if (shareCanvasRef.current)
+          shareCanvasRef.current.style.display = "none";
+        if (shareRenderVideoRef.current)
+          shareRenderVideoRef.current.style.display = "none";
+      }
+    };
+    // -------------------------------------------------------------------------
     const handleShareReceived = ({ userId }) => {
-      if (shareVideoRef.current) {
-        mediaStream.renderShare(shareVideoRef.current, userId, 1280, 720, 0, 0);
+      if (shareCanvasRef.current) {
+        mediaStream.renderShare(
+          shareCanvasRef.current,
+          userId,
+          1280,
+          720,
+          0,
+          0
+        );
+        shareCanvasRef.current.style.display = "block";
+        if (shareRenderVideoRef.current)
+          shareRenderVideoRef.current.style.display = "none";
       }
     };
     mediaStream.on("share-content-started", handleShareStarted);
     mediaStream.on("share-content-stopped", handleShareStopped);
     mediaStream.on("share-content-received", handleShareReceived);
+    clientRef.current.on("active-share-change", handleActiveShareChange);
     return () => {
       mediaStream.off("share-content-started", handleShareStarted);
       mediaStream.off("share-content-stopped", handleShareStopped);
       mediaStream.off("share-content-received", handleShareReceived);
+      clientRef.current.off("active-share-change", handleActiveShareChange);
     };
-  }, [clientRef, shareVideoRef]);
+  }, [clientRef, shareCanvasRef, shareRenderVideoRef]);
 
   // Start screen sharing with proper browser compatibility
   const startScreenShare = async () => {
     try {
       const mediaStream = clientRef.current.getMediaStream();
-      if (mediaStream.isStartShareScreenWithVideoElement()) {
+      if (webCodecsEnabled) {
+        // Use video element for sharer if WebCodecs is enabled
         await mediaStream.startShareScreen(shareRenderVideoRef.current);
         shareRenderVideoRef.current.style.display = "block";
+        shareCanvasRef.current.style.display = "none";
       } else {
+        // Use canvas for sharer if WebCodecs is not enabled
         await mediaStream.startShareScreen(shareCanvasRef.current);
         shareCanvasRef.current.style.display = "block";
+        shareRenderVideoRef.current.style.display = "none";
       }
       setIsSharing(true);
       setShowShare(false);
@@ -293,11 +387,11 @@ const MeetingPage = () => {
   // Mic toggle logic
   const toggleAudio = async () => {
     try {
-      if (!localAudioTrack) return;
+      if (!localAudioTrackRef.current) return;
       if (isAudioOn) {
-        await localAudioTrack.mute();
+        await localAudioTrackRef.current.mute();
       } else {
-        await localAudioTrack.unmute();
+        await localAudioTrackRef.current.unmute();
       }
       setIsAudioOn((v) => !v);
     } catch (err) {
@@ -307,31 +401,36 @@ const MeetingPage = () => {
 
   // Video toggle logic
   const toggleVideo = async () => {
+    if (isTogglingVideo) return;
+    setIsTogglingVideo(true);
     try {
       const currentUserId = localUserIdRef.current;
       const videoEl = videoRefs.current[currentUserId];
       const cameraId = getDeviceId(selectedCamera);
       if (isVideoOn) {
-        if (localVideoTrack) {
-          await localVideoTrack.stop();
-        }
+        await cleanupCamera(currentUserId);
       } else {
+        await new Promise((res) => setTimeout(res, 300));
         if (cameraId) {
-          localVideoTrack = await ZoomVideo.createLocalVideoTrack(cameraId);
+          localVideoTrackRef.current =
+            await ZoomVideo.createLocalVideoTrack(cameraId);
         } else {
-          localVideoTrack = await ZoomVideo.createLocalVideoTrack();
+          localVideoTrackRef.current = await ZoomVideo.createLocalVideoTrack();
         }
         if (videoEl) {
-          await localVideoTrack.start(videoEl);
+          await safeStartVideoTrack(localVideoTrackRef.current, videoEl);
         }
       }
       setIsVideoOn((v) => !v);
     } catch (err) {
       setError("Video toggle failed: " + (err?.message || err?.name || err));
+    } finally {
+      setIsTogglingVideo(false);
     }
   };
 
   const leaveSession = async () => {
+    await cleanupCamera(localUserIdRef.current);
     await cleanup();
     window.location.href = "/feedback";
   };
@@ -475,6 +574,7 @@ const MeetingPage = () => {
           className="control-button"
           onClick={toggleVideo}
           title={isVideoOn ? "Stop Video" : "Start Video"}
+          disabled={isTogglingVideo}
         >
           {isVideoOn ? <FaVideo size={22} /> : <FaVideoSlash size={22} />}
           <div className="control-label">
