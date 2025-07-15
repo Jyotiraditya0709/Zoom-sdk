@@ -24,13 +24,14 @@ const Preview = () => {
     sessionName,
     setSessionName,
     cleanup: contextCleanup,
+    bgMode,
+    setBgMode,
   } = useZoom();
 
   // ========== State for selected options ==========
   const [videoDevices, setVideoDevices] = useState([]);
   const [audioDevices, setAudioDevices] = useState([]); // mic array
   const [speakerDevices, setSpeakerDevices] = useState([]);
-  const [bgMode, setBgMode] = useState("none");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [isMicTesting, setIsMicTesting] = useState(false);

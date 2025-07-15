@@ -86,6 +86,8 @@ const MeetingPage = () => {
     userName,
     sessionName,
     cleanup,
+    bgMode,
+    setBgMode,
   } = useZoom();
   const [error, setError] = useState("");
   const [participants, setParticipants] = useState([]);
@@ -163,13 +165,10 @@ const MeetingPage = () => {
       setError("");
 
       try {
-        const client = ZoomVideo.createClient();
-        await client.init("en-US", "Global", {
-          patchJsMedia: true,
-          virtualBackground: {
-            isSupport: true,
-          },
-        });
+        // Use the client from context instead of creating a new one
+        const client = getClient();
+        // Only initialize if not already initialized (optional: check client state)
+        // await client.init("en-US", "Global", { patchJsMedia: true, virtualBackground: { isSupport: true } });
 
         // Save client to ref
         clientRef.current = client;
@@ -204,13 +203,20 @@ const MeetingPage = () => {
           localVideoTrackRef.current = await ZoomVideo.createLocalVideoTrack();
         }
         const el = videoRefs.current[myUser.userId];
-        if (el) {
-          await localVideoTrackRef.current.start(el);
-        } else {
-          setTimeout(async () => {
-            const el2 = videoRefs.current[myUser.userId];
-            if (el2) await localVideoTrackRef.current.start(el2);
-          }, 300);
+        if (el && localVideoTrackRef.current) {
+          // Apply background mode as in Preview.jsx
+          if (bgMode === "none") {
+            await localVideoTrackRef.current.start(el);
+            await localVideoTrackRef.current.updateVirtualBackground(undefined);
+          } else if (bgMode === "blur") {
+            await localVideoTrackRef.current.start(el, { imageUrl: "blur" });
+          } else if (bgMode === "image") {
+            await localVideoTrackRef.current.start(el, {
+              imageUrl: "/lib/vb-resource/background.jpg",
+            });
+          } else {
+            await localVideoTrackRef.current.start(el);
+          }
         }
 
         // Create and start local audio track
@@ -286,6 +292,34 @@ const MeetingPage = () => {
     };
     tryStart();
   }, [localUser]);
+
+  // Effect to update virtual background if bgMode changes in meeting
+  useEffect(() => {
+    const updateVB = async () => {
+      const el = videoRefs.current[localUserIdRef.current];
+      if (!localVideoTrackRef.current || !el) return;
+      try {
+        if (bgMode === "none") {
+          await localVideoTrackRef.current.stop();
+          await localVideoTrackRef.current.start(el);
+          await localVideoTrackRef.current.updateVirtualBackground(undefined);
+        } else if (bgMode === "blur") {
+          await localVideoTrackRef.current.stop();
+          await localVideoTrackRef.current.start(el, { imageUrl: "blur" });
+        } else if (bgMode === "image") {
+          await localVideoTrackRef.current.stop();
+          await localVideoTrackRef.current.start(el, {
+            imageUrl: "/lib/vb-resource/background.jpg",
+          });
+        }
+      } catch (err) {
+        setError(
+          "Failed to update virtual background: " + (err.reason || err.message)
+        );
+      }
+    };
+    updateVB();
+  }, [bgMode]);
 
   // Screen sharing event listeners
   useEffect(() => {
@@ -461,6 +495,25 @@ const MeetingPage = () => {
     if (e.target.classList.contains("modal")) closeFn();
   };
 
+  // State for background drop-up
+  const [showBgDropup, setShowBgDropup] = useState(false);
+  const cameraBtnRef = useRef(null);
+
+  // Close drop-up when clicking outside
+  useEffect(() => {
+    function handleClick(e) {
+      if (cameraBtnRef.current && !cameraBtnRef.current.contains(e.target)) {
+        setShowBgDropup(false);
+      }
+    }
+    if (showBgDropup) {
+      document.addEventListener("mousedown", handleClick);
+    } else {
+      document.removeEventListener("mousedown", handleClick);
+    }
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showBgDropup]);
+
   return (
     <div className="meeting-container">
       <div className="top-bar">Zoom Meeting - {sessionName}</div>
@@ -570,17 +623,103 @@ const MeetingPage = () => {
           )}
           <div className="control-label">{isAudioOn ? "Mute" : "Unmute"}</div>
         </button>
-        <button
-          className="control-button"
-          onClick={toggleVideo}
-          title={isVideoOn ? "Stop Video" : "Start Video"}
-          disabled={isTogglingVideo}
+        <div
+          style={{ position: "relative", display: "inline-block" }}
+          ref={cameraBtnRef}
         >
-          {isVideoOn ? <FaVideo size={22} /> : <FaVideoSlash size={22} />}
-          <div className="control-label">
-            {isVideoOn ? "Stop Video" : "Start Video"}
-          </div>
-        </button>
+          <button
+            className="control-button"
+            onClick={toggleVideo}
+            title={isVideoOn ? "Stop Video" : "Start Video"}
+            disabled={isTogglingVideo}
+            style={{ position: "relative" }}
+          >
+            {isVideoOn ? <FaVideo size={22} /> : <FaVideoSlash size={22} />}
+            <div className="control-label">
+              {isVideoOn ? "Stop Video" : "Start Video"}
+            </div>
+          </button>
+          <button
+            style={{
+              position: "absolute",
+              right: 0,
+              bottom: 40,
+              background: "#222",
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              padding: "2px 8px",
+              fontSize: 12,
+              cursor: "pointer",
+              zIndex: 10,
+            }}
+            onClick={() => setShowBgDropup((v) => !v)}
+            title="Change Background"
+          >
+            ▼
+          </button>
+          {showBgDropup && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: 50,
+                right: 0,
+                background: "#222",
+                color: "#fff",
+                borderRadius: 10,
+                boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+                padding: 12,
+                minWidth: 120,
+                zIndex: 100,
+              }}
+            >
+              <div style={{ marginBottom: 8, fontWeight: 600 }}>
+                Virtual Background
+              </div>
+              <div>
+                <label style={{ display: "block", marginBottom: 6 }}>
+                  <input
+                    type="radio"
+                    name="bgMode"
+                    value="none"
+                    checked={bgMode === "none"}
+                    onChange={() => {
+                      setBgMode("none");
+                      setShowBgDropup(false);
+                    }}
+                  />
+                  None
+                </label>
+                <label style={{ display: "block", marginBottom: 6 }}>
+                  <input
+                    type="radio"
+                    name="bgMode"
+                    value="blur"
+                    checked={bgMode === "blur"}
+                    onChange={() => {
+                      setBgMode("blur");
+                      setShowBgDropup(false);
+                    }}
+                  />
+                  Blur
+                </label>
+                <label style={{ display: "block" }}>
+                  <input
+                    type="radio"
+                    name="bgMode"
+                    value="image"
+                    checked={bgMode === "image"}
+                    onChange={() => {
+                      setBgMode("image");
+                      setShowBgDropup(false);
+                    }}
+                  />
+                  Image
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
         <button
           className="control-button"
           onClick={() => setShowParticipants(true)}
