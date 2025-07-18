@@ -1,4 +1,3 @@
-// MeetingPage.jsx (Updated with Proper Screen Sharing)
 import React, { useEffect, useRef, useState } from "react";
 import { useZoom } from "../preview/ZoomContext";
 import axios from "axios";
@@ -86,8 +85,6 @@ const MeetingPage = () => {
     userName,
     sessionName,
     cleanup,
-    bgMode,
-    setBgMode,
   } = useZoom();
   const [error, setError] = useState("");
   const [participants, setParticipants] = useState([]);
@@ -95,6 +92,7 @@ const MeetingPage = () => {
   const [isVideoOn, setIsVideoOn] = useState(true);
   const clientRef = useRef(null);
   const videoRefs = useRef({});
+  const videoCanvasRefs = useRef({});
   const localUserIdRef = useRef(null);
   const [showParticipants, setShowParticipants] = useState(false);
   const [showChat, setShowChat] = useState(false);
@@ -111,6 +109,7 @@ const MeetingPage = () => {
   const [isJoining, setIsJoining] = useState(false);
   const [localUser, setLocalUser] = useState(null);
   const [isTogglingVideo, setIsTogglingVideo] = useState(false);
+  const [bgMode, setBgMode] = useState("none");
 
   let localVideoTrack = null;
   let localAudioTrack = null;
@@ -165,13 +164,15 @@ const MeetingPage = () => {
       setError("");
 
       try {
-        // Use the client from context instead of creating a new one
         const client = getClient();
-        // Only initialize if not already initialized (optional: check client state)
-        // await client.init("en-US", "Global", { patchJsMedia: true, virtualBackground: { isSupport: true } });
-
-        // Save client to ref
         clientRef.current = client;
+
+        // --- Add this block before join ---
+        await client.init("en-US", "Global", {
+          patchJsMedia: true,
+          virtualBackground: { isSupport: true },
+        });
+        // ----------------------------------
 
         const token = await getSignature();
         await client.join(sessionName, token, userName);
@@ -202,21 +203,20 @@ const MeetingPage = () => {
         } else {
           localVideoTrackRef.current = await ZoomVideo.createLocalVideoTrack();
         }
+        // Start the video track immediately after joining, like preview.jsx
         const el = videoRefs.current[myUser.userId];
-        if (el && localVideoTrackRef.current) {
-          // Apply background mode as in Preview.jsx
-          if (bgMode === "none") {
-            await localVideoTrackRef.current.start(el);
-            await localVideoTrackRef.current.updateVirtualBackground(undefined);
-          } else if (bgMode === "blur") {
-            await localVideoTrackRef.current.start(el, { imageUrl: "blur" });
-          } else if (bgMode === "image") {
-            await localVideoTrackRef.current.start(el, {
-              imageUrl: "/lib/vb-resource/background.jpg",
-            });
-          } else {
-            await localVideoTrackRef.current.start(el);
-          }
+        const canvasEl = videoCanvasRefs.current[myUser.userId];
+        if (bgMode === "none" && el) {
+          await localVideoTrackRef.current.start(el);
+          await localVideoTrackRef.current.updateVirtualBackground(undefined);
+        } else if (bgMode === "blur" && canvasEl) {
+          await localVideoTrackRef.current.start(canvasEl, {
+            imageUrl: "blur",
+          });
+        } else if (bgMode === "image" && canvasEl) {
+          await localVideoTrackRef.current.start(canvasEl, {
+            imageUrl: "/lib/vb-resource/background.jpg",
+          });
         }
 
         // Create and start local audio track
@@ -295,23 +295,23 @@ const MeetingPage = () => {
 
   // Effect to update virtual background if bgMode changes in meeting
   useEffect(() => {
+    const el = videoRefs.current[localUserIdRef.current];
+    const canvasEl = videoCanvasRefs.current[localUserIdRef.current];
+    if (!localVideoTrackRef.current || (!el && !canvasEl)) return;
     const updateVB = async () => {
-      const el = videoRefs.current[localUserIdRef.current];
-      if (!localVideoTrackRef.current || !el) return;
       try {
-        if (bgMode === "none") {
-          await localVideoTrackRef.current.stop();
+        await localVideoTrackRef.current.stop();
+        if (bgMode === "none" && el) {
           await localVideoTrackRef.current.start(el);
           await localVideoTrackRef.current.updateVirtualBackground(undefined);
-        } else if (bgMode === "blur") {
-          await localVideoTrackRef.current.stop();
-          await localVideoTrackRef.current.start(el, { imageUrl: "blur" });
-        } else if (bgMode === "image") {
-          await localVideoTrackRef.current.stop();
-          await localVideoTrackRef.current.start(el, {
+        } else if (bgMode === "blur" && canvasEl) {
+          await localVideoTrackRef.current.start(canvasEl, { imageUrl: "blur" });
+        } else if (bgMode === "image" && canvasEl) {
+          await localVideoTrackRef.current.start(canvasEl, {
             imageUrl: "/lib/vb-resource/background.jpg",
           });
         }
+        setError("");
       } catch (err) {
         setError(
           "Failed to update virtual background: " + (err.reason || err.message)
@@ -319,12 +319,17 @@ const MeetingPage = () => {
       }
     };
     updateVB();
-  }, [bgMode]);
+  }, [
+    bgMode,
+    localUser,
+    videoRefs.current[localUserIdRef.current],
+    videoCanvasRefs.current[localUserIdRef.current],
+  ]);
 
   // Screen sharing event listeners
   useEffect(() => {
     if (!clientRef.current) return;
-    // Only listen for events on the client object, not mediaStream
+    const mediaStream = clientRef.current.getMediaStream();
     const handleShareStarted = () => setIsSharing(true);
     const handleShareStopped = () => {
       setIsSharing(false);
@@ -332,8 +337,8 @@ const MeetingPage = () => {
         shareRenderVideoRef.current.style.display = "none";
       if (shareCanvasRef.current) shareCanvasRef.current.style.display = "none";
     };
+    // For viewers: always use canvas for incoming share
     const handleActiveShareChange = ({ userId, state }) => {
-      const mediaStream = clientRef.current.getMediaStream();
       if (!mediaStream) return;
       if (state === "Active") {
         if (shareCanvasRef.current) {
@@ -352,8 +357,8 @@ const MeetingPage = () => {
           shareRenderVideoRef.current.style.display = "none";
       }
     };
+    // -------------------------------------------------------------------------
     const handleShareReceived = ({ userId }) => {
-      const mediaStream = clientRef.current.getMediaStream();
       if (shareCanvasRef.current) {
         mediaStream.renderShare(
           shareCanvasRef.current,
@@ -368,7 +373,7 @@ const MeetingPage = () => {
           shareRenderVideoRef.current.style.display = "none";
       }
     };
-    // Listen for events on the client object
+    // FIX: Use clientRef.current.on/off instead of mediaStream.on/off
     clientRef.current.on("share-content-started", handleShareStarted);
     clientRef.current.on("share-content-stopped", handleShareStopped);
     clientRef.current.on("share-content-received", handleShareReceived);
@@ -425,10 +430,11 @@ const MeetingPage = () => {
       if (!localAudioTrackRef.current) return;
       if (isAudioOn) {
         await localAudioTrackRef.current.mute();
+        setIsAudioOn(false);
       } else {
         await localAudioTrackRef.current.unmute();
+        setIsAudioOn(true);
       }
-      setIsAudioOn((v) => !v);
     } catch (err) {
       setError("Audio toggle failed: " + (err?.message || err?.name || err));
     }
@@ -575,16 +581,34 @@ const MeetingPage = () => {
       <div className="video-grid">
         {participants.map((user) => (
           <div className="video-tile" key={user.userId}>
+            {/* Video element for "none" background */}
             <video
               ref={(el) => (videoRefs.current[user.userId] = el)}
               autoPlay
               muted={user.userId === localUserIdRef.current}
               playsInline
               className="video-element"
-              style={{ background: "black", width: "100%", height: "100%" }}
+              style={{
+                background: "black",
+                width: "100%",
+                height: "100%",
+                display: bgMode === "none" ? "block" : "none",
+              }}
+            />
+            {/* Canvas for blur/image background */}
+            <canvas
+              ref={(el) => (videoCanvasRefs.current[user.userId] = el)}
+              width={1280}
+              height={720}
+              style={{
+                width: "100%",
+                height: "100%",
+                background: "black",
+                display: bgMode !== "none" ? "block" : "none",
+              }}
             />
             {/* Show error if local video fails */}
-            {user.userId === localUserIdRef.current && error && (
+            {user.userId === localUserIdRef.current && error && !isVideoOn && (
               <div
                 style={{
                   position: "absolute",
@@ -1047,7 +1071,6 @@ const MeetingPage = () => {
           </div>
         </div>
       )}
-
       {error && <div className="error-box">{error}</div>}
     </div>
   );

@@ -19,8 +19,8 @@ export const ZoomProvider = ({ children }) => {
   const [selectedSpeaker, setSelectedSpeaker] = useState("");
   const [userName, setUserName] = useState("Guest");
   const [sessionName, setSessionName] = useState("meeting-test");
-  // Add bgMode to context
-  const [bgMode, setBgMode] = useState("none");
+  // Remove bgMode from context
+  // const [bgMode, setBgMode] = useState("none");
 
   // Create or reuse client
   const getClient = useCallback(() => {
@@ -68,9 +68,7 @@ export const ZoomProvider = ({ children }) => {
         sessionName,
         setSessionName,
         cleanup,
-        // Add bgMode to context value
-        bgMode,
-        setBgMode,
+        // bgMode and setBgMode removed from context value
       }}
     >
       {children}

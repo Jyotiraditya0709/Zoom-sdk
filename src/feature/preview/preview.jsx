@@ -24,9 +24,11 @@ const Preview = () => {
     sessionName,
     setSessionName,
     cleanup: contextCleanup,
-    bgMode,
-    setBgMode,
+    // bgMode and setBgMode removed from context
   } = useZoom();
+
+  // Add local state for bgMode
+  const [bgMode, setBgMode] = useState("none");
 
   // ========== State for selected options ==========
   const [videoDevices, setVideoDevices] = useState([]);
