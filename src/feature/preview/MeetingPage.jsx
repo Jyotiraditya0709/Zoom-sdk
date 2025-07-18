@@ -324,7 +324,7 @@ const MeetingPage = () => {
   // Screen sharing event listeners
   useEffect(() => {
     if (!clientRef.current) return;
-    const mediaStream = clientRef.current.getMediaStream();
+    // Only listen for events on the client object, not mediaStream
     const handleShareStarted = () => setIsSharing(true);
     const handleShareStopped = () => {
       setIsSharing(false);
@@ -332,8 +332,8 @@ const MeetingPage = () => {
         shareRenderVideoRef.current.style.display = "none";
       if (shareCanvasRef.current) shareCanvasRef.current.style.display = "none";
     };
-    // For viewers: always use canvas for incoming share
     const handleActiveShareChange = ({ userId, state }) => {
+      const mediaStream = clientRef.current.getMediaStream();
       if (!mediaStream) return;
       if (state === "Active") {
         if (shareCanvasRef.current) {
@@ -352,8 +352,8 @@ const MeetingPage = () => {
           shareRenderVideoRef.current.style.display = "none";
       }
     };
-    // -------------------------------------------------------------------------
     const handleShareReceived = ({ userId }) => {
+      const mediaStream = clientRef.current.getMediaStream();
       if (shareCanvasRef.current) {
         mediaStream.renderShare(
           shareCanvasRef.current,
@@ -368,14 +368,15 @@ const MeetingPage = () => {
           shareRenderVideoRef.current.style.display = "none";
       }
     };
-    mediaStream.on("share-content-started", handleShareStarted);
-    mediaStream.on("share-content-stopped", handleShareStopped);
-    mediaStream.on("share-content-received", handleShareReceived);
+    // Listen for events on the client object
+    clientRef.current.on("share-content-started", handleShareStarted);
+    clientRef.current.on("share-content-stopped", handleShareStopped);
+    clientRef.current.on("share-content-received", handleShareReceived);
     clientRef.current.on("active-share-change", handleActiveShareChange);
     return () => {
-      mediaStream.off("share-content-started", handleShareStarted);
-      mediaStream.off("share-content-stopped", handleShareStopped);
-      mediaStream.off("share-content-received", handleShareReceived);
+      clientRef.current.off("share-content-started", handleShareStarted);
+      clientRef.current.off("share-content-stopped", handleShareStopped);
+      clientRef.current.off("share-content-received", handleShareReceived);
       clientRef.current.off("active-share-change", handleActiveShareChange);
     };
   }, [clientRef, shareCanvasRef, shareRenderVideoRef]);
