@@ -165,6 +165,7 @@ const Preview = () => {
 
   // ========== Join Meeting Handler ==========
   const handleJoin = async () => {
+    setUserName(userName); // Make sure this updates the context
     await contextCleanup();
     localVideoTrack = null;
     localAudioTrack = null;
@@ -351,6 +352,17 @@ const Preview = () => {
               <option value="blur">Blur</option>
               <option value="image">Image</option>
             </select>
+          </label>
+
+          <label>
+            Your Name:
+            <input
+              type="text"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              placeholder="Enter your name"
+              style={{ marginLeft: 8 }}
+            />
           </label>
 
           <div className="test-controls">

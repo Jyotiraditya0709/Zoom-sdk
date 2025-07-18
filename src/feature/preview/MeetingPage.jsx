@@ -1071,7 +1071,7 @@ const MeetingPage = () => {
           </div>
         </div>
       )}
-      {error && <div className="error-box">{error}</div>}
+      {/* {error && <div className="error-box">{error}</div>} */}
     </div>
   );
 };
