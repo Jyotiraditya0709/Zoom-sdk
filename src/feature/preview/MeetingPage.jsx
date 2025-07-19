@@ -146,7 +146,7 @@ const MeetingPage = () => {
     const getSignature = async () => {
       try {
         const response = await axios.post(
-          "http://localhost:4000/generateSignature",
+          "https://zoom-video-sdk-auth-sample-4y9b.onrender.com/",
           {
             sessionName,
             role: 1, // 1 = host, 0 = attendee
@@ -305,7 +305,9 @@ const MeetingPage = () => {
           await localVideoTrackRef.current.start(el);
           await localVideoTrackRef.current.updateVirtualBackground(undefined);
         } else if (bgMode === "blur" && canvasEl) {
-          await localVideoTrackRef.current.start(canvasEl, { imageUrl: "blur" });
+          await localVideoTrackRef.current.start(canvasEl, {
+            imageUrl: "blur",
+          });
         } else if (bgMode === "image" && canvasEl) {
           await localVideoTrackRef.current.start(canvasEl, {
             imageUrl: "/lib/vb-resource/background.jpg",
