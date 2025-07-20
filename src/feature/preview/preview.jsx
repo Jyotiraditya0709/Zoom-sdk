@@ -127,16 +127,14 @@ const Preview = () => {
     const updateVB = async () => {
       if (!localVideoTrack) return;
       try {
-        console.log("Updating VB to", bgMode);
+        // Always stop before switching
+        await localVideoTrack.stop();
         if (bgMode === "none") {
-          await localVideoTrack.stop();
           await localVideoTrack.start(videoRef.current);
           await localVideoTrack.updateVirtualBackground(undefined);
         } else if (bgMode === "blur") {
-          await localVideoTrack.stop();
           await localVideoTrack.start(canvasRef.current, { imageUrl: "blur" });
         } else if (bgMode === "image") {
-          await localVideoTrack.stop();
           await localVideoTrack.start(canvasRef.current, {
             imageUrl: "/lib/vb-resource/background.jpg",
           });
@@ -146,8 +144,14 @@ const Preview = () => {
         setError("Failed to update virtual background.");
       }
     };
-    updateVB();
-  }, [bgMode]);
+    // Only run if the video element or canvas is mounted
+    if (
+      (bgMode === "none" && videoRef.current) ||
+      ((bgMode === "blur" || bgMode === "image") && canvasRef.current)
+    ) {
+      updateVB();
+    }
+  }, [bgMode, videoRef.current, canvasRef.current]);
 
   useEffect(() => {
     if (selectedCamera && selectedMic) {

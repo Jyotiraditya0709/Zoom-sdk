@@ -146,7 +146,7 @@ const MeetingPage = () => {
     const getSignature = async () => {
       try {
         const response = await axios.post(
-          "https://zoom-video-sdk-auth-sample-4y9b.onrender.com/",
+          "https://zoom-auth-endpoint-1.onrender.com",
           {
             sessionName,
             role: 1, // 1 = host, 0 = attendee
@@ -297,19 +297,24 @@ const MeetingPage = () => {
   useEffect(() => {
     const el = videoRefs.current[localUserIdRef.current];
     const canvasEl = videoCanvasRefs.current[localUserIdRef.current];
-    if (!localVideoTrackRef.current || (!el && !canvasEl)) return;
+    const videoTrack = localVideoTrackRef.current;
+
+    if (!videoTrack || (!el && !canvasEl)) return;
+
     const updateVB = async () => {
       try {
-        await localVideoTrackRef.current.stop();
+        // Only stop if the track is started
+        if (videoTrack.isStarted && typeof videoTrack.stop === "function") {
+          await videoTrack.stop();
+        }
+        // Start video on the correct element and update background
         if (bgMode === "none" && el) {
-          await localVideoTrackRef.current.start(el);
-          await localVideoTrackRef.current.updateVirtualBackground(undefined);
+          await videoTrack.start(el);
+          await videoTrack.updateVirtualBackground(undefined);
         } else if (bgMode === "blur" && canvasEl) {
-          await localVideoTrackRef.current.start(canvasEl, {
-            imageUrl: "blur",
-          });
+          await videoTrack.start(canvasEl, { imageUrl: "blur" });
         } else if (bgMode === "image" && canvasEl) {
-          await localVideoTrackRef.current.start(canvasEl, {
+          await videoTrack.start(canvasEl, {
             imageUrl: "/lib/vb-resource/background.jpg",
           });
         }
@@ -320,7 +325,14 @@ const MeetingPage = () => {
         );
       }
     };
-    updateVB();
+
+    // Only run if the correct element is mounted
+    if (
+      (bgMode === "none" && el) ||
+      ((bgMode === "blur" || bgMode === "image") && canvasEl)
+    ) {
+      updateVB();
+    }
   }, [
     bgMode,
     localUser,
