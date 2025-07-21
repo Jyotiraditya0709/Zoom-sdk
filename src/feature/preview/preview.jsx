@@ -171,10 +171,20 @@ const Preview = () => {
 
   // ========== Join Meeting Handler ==========
   const handleJoin = async () => {
-    setUserName(userName); // Make sure this updates the context
-    await contextCleanup();
+    // Stop the preview tracks to release the camera and microphone
+    if (localVideoTrack) {
+      await localVideoTrack.stop();
+    }
+    if (localAudioTrack) {
+      await localAudioTrack.stop();
+    }
+    // Clean up module-level variables
     localVideoTrack = null;
     localAudioTrack = null;
+
+    // The context will be updated with the latest user/session name from the input fields
+    await contextCleanup(); // Clean up any other context-related resources
+
     navigate(
       `/meeting?session=${encodeURIComponent(
         sessionName
