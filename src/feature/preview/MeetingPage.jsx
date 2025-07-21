@@ -14,6 +14,7 @@ import {
   FaSignOutAlt,
 } from "react-icons/fa";
 import ZoomVideo from "@zoom/videosdk";
+import { useLocation, useNavigate } from "react-router-dom";
 
 // Helper functions for robust device fallback
 async function createSafeLocalVideoTrack(selectedCamera) {
@@ -78,14 +79,40 @@ async function safeStartVideoTrack(track, videoEl, retries = 3, delay = 300) {
 }
 
 const MeetingPage = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Helper to parse query params
+  function getQueryParam(param) {
+    const params = new URLSearchParams(location.search);
+    return params.get(param);
+  }
+
+  // Get sessionName and userName from URL, fallback to context
+  const urlSessionName = getQueryParam("session");
+  const urlUserName = getQueryParam("user");
+  const urlRole = getQueryParam("role");
+
   const {
     getClient,
     selectedCamera,
     selectedMic,
-    userName,
-    sessionName,
+    userName: contextUserName,
+    sessionName: contextSessionName,
     cleanup,
   } = useZoom();
+
+  // Use URL params if present, else context values
+  const sessionName = urlSessionName || contextSessionName;
+  const userName = urlUserName || contextUserName;
+  const role = urlRole !== null ? Number(urlRole) : 1; // default to host if missing
+
+  // Redirect if missing required info
+  useEffect(() => {
+    if (!sessionName || !userName || role === null || role === undefined) {
+      navigate("/", { replace: true });
+    }
+  }, [sessionName, userName, role, navigate]);
+
   const [error, setError] = useState("");
   const [participants, setParticipants] = useState([]);
   const [isAudioOn, setIsAudioOn] = useState(true);
@@ -110,6 +137,7 @@ const MeetingPage = () => {
   const [localUser, setLocalUser] = useState(null);
   const [isTogglingVideo, setIsTogglingVideo] = useState(false);
   const [bgMode, setBgMode] = useState("none");
+  const [isBgLoading, setIsBgLoading] = useState(false);
 
   let localVideoTrack = null;
   let localAudioTrack = null;
@@ -149,7 +177,7 @@ const MeetingPage = () => {
           "https://zoom-sdk-be-1.onrender.com/generateSignature",
           {
             sessionName,
-            role: 1, // 1 = host, 0 = attendee
+            role,
           }
         );
         return response.data.signature;
@@ -166,6 +194,13 @@ const MeetingPage = () => {
       try {
         const client = getClient();
         clientRef.current = client;
+
+        // Leave any existing session before joining a new one
+        try {
+          await client.leave();
+        } catch (e) {
+          // Ignore if not joined yet
+        }
 
         // --- Add this block before join ---
         await client.init("en-US", "Global", {
@@ -276,7 +311,7 @@ const MeetingPage = () => {
       }
       cleanup();
     };
-  }, [getClient, sessionName, userName, cleanup, selectedCamera]);
+  }, [getClient, sessionName, userName, cleanup, selectedCamera, role]);
 
   // Effect to start video when both track and ref are ready
   useEffect(() => {
@@ -302,12 +337,10 @@ const MeetingPage = () => {
     if (!videoTrack || (!el && !canvasEl)) return;
 
     const updateVB = async () => {
+      setIsBgLoading(true);
       try {
-        // Only stop if the track is started
-        if (videoTrack.isStarted && typeof videoTrack.stop === "function") {
-          await videoTrack.stop();
-        }
-        // Start video on the correct element and update background
+        // Always stop before switching
+        await videoTrack.stop();
         if (bgMode === "none" && el) {
           await videoTrack.start(el);
           await videoTrack.updateVirtualBackground(undefined);
@@ -323,6 +356,8 @@ const MeetingPage = () => {
         setError(
           "Failed to update virtual background: " + (err.reason || err.message)
         );
+      } finally {
+        setIsBgLoading(false);
       }
     };
 
@@ -534,6 +569,72 @@ const MeetingPage = () => {
     }
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showBgDropup]);
+
+  useEffect(() => {
+    if (!clientRef.current) return;
+    const client = clientRef.current;
+    const handleChatMessage = (payload) => {
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          sender: payload.senderName || payload.senderId || "Unknown",
+          content: payload.message,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+      ]);
+    };
+    client.on("chat-message-received", handleChatMessage);
+    return () => {
+      client.off("chat-message-received", handleChatMessage);
+    };
+  }, [clientRef]);
+
+  useEffect(() => {
+    if (!clientRef.current) return;
+    const client = clientRef.current;
+
+    // Helper to subscribe to a user's video
+    const subscribeUserVideo = (user) => {
+      if (!user || !user.userId) return;
+      const el = videoRefs.current[user.userId];
+      if (el) {
+        client.subscribeVideo(user.userId, el).catch(() => {});
+      }
+    };
+
+    // Subscribe to video for all current participants (except local)
+    participants.forEach((user) => {
+      if (user.userId !== localUserIdRef.current) {
+        subscribeUserVideo(user);
+      }
+    });
+
+    // Listen for user video state changes
+    const handleUserUpdated = (users) => {
+      users.forEach((user) => {
+        if (
+          user.userId !== localUserIdRef.current &&
+          user.videoStatus === "on"
+        ) {
+          subscribeUserVideo(user);
+        }
+      });
+    };
+    client.on("user-updated", handleUserUpdated);
+
+    // Clean up on unmount
+    return () => {
+      client.off("user-updated", handleUserUpdated);
+      // Optionally, unsubscribe from all remote videos
+      participants.forEach((user) => {
+        if (user.userId !== localUserIdRef.current) {
+          try {
+            client.unsubscribeVideo(user.userId);
+          } catch {}
+        }
+      });
+    };
+  }, [participants, clientRef]);
 
   return (
     <div className="meeting-container">
@@ -756,6 +857,22 @@ const MeetingPage = () => {
                   Image
                 </label>
               </div>
+            </div>
+          )}
+          {isBgLoading && (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                background: "rgba(0,0,0,0.3)",
+                color: "#fff",
+                textAlign: "center",
+                zIndex: 200,
+              }}
+            >
+              Switching background...
             </div>
           )}
         </div>
