@@ -29,6 +29,8 @@ const Preview = () => {
 
   // Add local state for bgMode
   const [bgMode, setBgMode] = useState("none");
+  // Add local state for role
+  const [role, setRole] = useState("1"); // 1 = host, 0 = attendee
 
   // ========== State for selected options ==========
   const [videoDevices, setVideoDevices] = useState([]);
@@ -173,7 +175,11 @@ const Preview = () => {
     await contextCleanup();
     localVideoTrack = null;
     localAudioTrack = null;
-    navigate("/meeting");
+    navigate(
+      `/meeting?session=${encodeURIComponent(
+        sessionName
+      )}&user=${encodeURIComponent(userName)}&role=${role}`
+    );
   };
 
   // ========== Mic Testing Feature ==========
@@ -350,12 +356,35 @@ const Preview = () => {
           </label>
 
           <label>
+            Role:
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              style={{ marginLeft: 8 }}
+            >
+              <option value="1">Host</option>
+              <option value="0">Attendee</option>
+            </select>
+          </label>
+
+          <label>
             Virtual Background:
             <select value={bgMode} onChange={(e) => setBgMode(e.target.value)}>
               <option value="none">None</option>
               <option value="blur">Blur</option>
               <option value="image">Image</option>
             </select>
+          </label>
+
+          <label>
+            Session Name:
+            <input
+              type="text"
+              value={sessionName}
+              onChange={(e) => setSessionName(e.target.value)}
+              placeholder="Enter session name"
+              style={{ marginLeft: 8 }}
+            />
           </label>
 
           <label>
@@ -368,6 +397,20 @@ const Preview = () => {
               style={{ marginLeft: 8 }}
             />
           </label>
+
+          {/* Shareable meeting link */}
+          {sessionName && userName && (
+            <div style={{ margin: "12px 0", wordBreak: "break-all" }}>
+              <strong>Shareable Meeting Link:</strong>
+              <div style={{ background: "#eee", padding: 6, borderRadius: 4 }}>
+                {`${
+                  window.location.origin
+                }/meeting?session=${encodeURIComponent(
+                  sessionName
+                )}&user=${encodeURIComponent(userName)}&role=${role}`}
+              </div>
+            </div>
+          )}
 
           <div className="test-controls">
             <button onClick={handleMicTest}>
