@@ -40,6 +40,9 @@ const MeetingPage = () => {
   const screenShareContainerRef = useRef(null);
   const remoteShareContainerRef = useRef(null);
   const [annotationError, setAnnotationError] = useState("");
+  const [recordingStatus, setRecordingStatus] = useState("stopped"); // "stopped" | "recording" | "paused"
+  const [showRecordingNotice, setShowRecordingNotice] = useState(false);
+  const recordingClientRef = useRef(null);
 
   // Refs
   const clientRef = useRef(null);
@@ -57,6 +60,7 @@ const MeetingPage = () => {
       role: parseInt(params.get("role") || "1", 10),
     };
   }, [location.search]);
+  const isHost = role === 1;
 
   const attachVideo = useCallback(
     async (userId) => {
@@ -166,6 +170,24 @@ const MeetingPage = () => {
               await attachVideo(user.userId);
             }
           });
+
+          // Cloud recording logic
+          recordingClientRef.current = client.getRecordingClient();
+          // Start recording automatically if host
+          if (isHost && recordingClientRef.current.canStartRecording()) {
+            const res = await recordingClientRef.current.startCloudRecording();
+            if (res === "") {
+              setRecordingStatus("recording");
+              setShowRecordingNotice(true);
+            }
+          }
+          // If not host, just show the notice if recording is active
+          if (
+            !isHost &&
+            recordingClientRef.current.getCloudRecordingStatus() === "recording"
+          ) {
+            setShowRecordingNotice(true);
+          }
         }, 500); // Small delay to allow React to render containers
 
         setupEventListeners();
@@ -359,6 +381,34 @@ const MeetingPage = () => {
     }
   };
 
+  // Recording control functions (host only)
+  const startRecording = async () => {
+    if (!recordingClientRef.current) return;
+    const res = await recordingClientRef.current.startCloudRecording();
+    if (res === "") {
+      setRecordingStatus("recording");
+      setShowRecordingNotice(true);
+    }
+  };
+  const pauseRecording = async () => {
+    if (!recordingClientRef.current) return;
+    const res = await recordingClientRef.current.pauseCloudRecording();
+    if (res === "") setRecordingStatus("paused");
+  };
+  const resumeRecording = async () => {
+    if (!recordingClientRef.current) return;
+    const res = await recordingClientRef.current.resumeCloudRecording();
+    if (res === "") setRecordingStatus("recording");
+  };
+  const stopRecording = async () => {
+    if (!recordingClientRef.current) return;
+    const res = await recordingClientRef.current.stopCloudRecording();
+    if (res === "") {
+      setRecordingStatus("stopped");
+      setShowRecordingNotice(false);
+    }
+  };
+
   if (isJoining) return <div>Joining meeting...</div>;
   if (error)
     return (
@@ -406,6 +456,13 @@ const MeetingPage = () => {
           </div>
         ))}
       </div>
+
+      {showRecordingNotice && (
+        <div className="recording-notice">
+          <span className="recording-dot">●</span> This meeting is being
+          recorded.
+        </div>
+      )}
 
       <div className="control-bar">
         <button className="control-button" onClick={toggleAudio}>
@@ -459,6 +516,35 @@ const MeetingPage = () => {
               Annotate
             </button>
           ))}
+        {isHost && (
+          <>
+            {recordingStatus === "stopped" && (
+              <button className="control-button" onClick={startRecording}>
+                Start Recording
+              </button>
+            )}
+            {recordingStatus === "recording" && (
+              <>
+                <button className="control-button" onClick={pauseRecording}>
+                  Pause Recording
+                </button>
+                <button className="control-button" onClick={stopRecording}>
+                  Stop Recording
+                </button>
+              </>
+            )}
+            {recordingStatus === "paused" && (
+              <>
+                <button className="control-button" onClick={resumeRecording}>
+                  Resume Recording
+                </button>
+                <button className="control-button" onClick={stopRecording}>
+                  Stop Recording
+                </button>
+              </>
+            )}
+          </>
+        )}
         <button className="control-button leave" onClick={() => navigate("/")}>
           {" "}
           <FaSignOutAlt /> Leave{" "}
