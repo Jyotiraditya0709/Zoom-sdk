@@ -32,6 +32,12 @@ const MeetingPage = () => {
     chat: false,
   });
   const [chatInput, setChatInput] = useState("");
+  const [isSharingScreen, setIsSharingScreen] = useState(false);
+  const [isRemoteSharing, setIsRemoteSharing] = useState(false);
+  const [isAnnotating, setIsAnnotating] = useState(false);
+  const screenShareContainerRef = useRef(null);
+  const remoteShareContainerRef = useRef(null);
+  const [annotationError, setAnnotationError] = useState("");
 
   // Refs
   const clientRef = useRef(null);
@@ -171,6 +177,35 @@ const MeetingPage = () => {
 
     joinSession();
 
+    // Add screen share event listeners
+    client.on("passively-stop-share", () => {
+      setIsSharingScreen(false);
+    });
+
+    client.on("active-share-change", (payload) => {
+      if (!mediaStreamRef.current) return;
+      if (payload.state === "Active") {
+        setIsRemoteSharing(true);
+        mediaStreamRef.current.startShareView(
+          remoteShareContainerRef.current,
+          payload.userId
+        );
+      } else if (payload.state === "Inactive") {
+        setIsRemoteSharing(false);
+        mediaStreamRef.current.stopShareView();
+      }
+    });
+
+    // Optional: Listen for annotation privilege changes
+    client.on(
+      "annotation-privilege-change",
+      ({ userId, isAnnotationEnabled }) => {
+        if (!isAnnotationEnabled && isAnnotating) {
+          stopAnnotation();
+        }
+      }
+    );
+
     return () => {
       if (clientRef.current) {
         clientRef.current.leave();
@@ -255,6 +290,73 @@ const MeetingPage = () => {
     [chatInput]
   );
 
+  // Screen share start/stop logic
+  const handleScreenShare = async () => {
+    console.log(
+      "handleScreenShare called",
+      screenShareContainerRef.current,
+      isSharingScreen
+    );
+    if (!mediaStreamRef.current) {
+      console.log("mediaStreamRef.current is null");
+      return;
+    }
+    try {
+      if (!isSharingScreen) {
+        const el = screenShareContainerRef.current;
+        if (!el) {
+          setError("Screen share element not found.");
+          console.log("Screen share element not found");
+          return;
+        }
+        if (mediaStreamRef.current.isStartShareScreenWithVideoElement()) {
+          console.log("Starting share with video element");
+          await mediaStreamRef.current.startShareScreen(el);
+        } else {
+          console.log("Starting share with canvas element");
+          await mediaStreamRef.current.startShareScreen(el);
+        }
+        setIsSharingScreen(true);
+        console.log("Screen sharing started");
+      } else {
+        await mediaStreamRef.current.stopShareScreen();
+        setIsSharingScreen(false);
+        console.log("Screen sharing stopped");
+      }
+    } catch (err) {
+      setError("Screen share failed.");
+      setIsSharingScreen(false);
+      console.log("Screen share error", err);
+    }
+  };
+
+  // Annotation logic
+  const handleStartAnnotation = async () => {
+    if (!mediaStreamRef.current) return;
+    try {
+      await mediaStreamRef.current.startAnnotation();
+      const annotationController =
+        mediaStreamRef.current.getAnnotationController();
+      // Set pen tool as default
+      await annotationController.setToolType(1); // Pen
+      await annotationController.setToolWidth(8);
+      setIsAnnotating(true);
+      setAnnotationError("");
+    } catch (err) {
+      setAnnotationError("Failed to start annotation.");
+      setIsAnnotating(false);
+    }
+  };
+  const stopAnnotation = async () => {
+    if (!mediaStreamRef.current) return;
+    try {
+      await mediaStreamRef.current.stopAnnotation();
+      setIsAnnotating(false);
+    } catch (err) {
+      setAnnotationError("Failed to stop annotation.");
+    }
+  };
+
   if (isJoining) return <div>Joining meeting...</div>;
   if (error)
     return (
@@ -266,6 +368,32 @@ const MeetingPage = () => {
   return (
     <div className="meeting-container">
       <div className="top-bar">Zoom Meeting - {sessionName}</div>
+
+      {/* Screen Share Containers */}
+      {/* Replace the conditional rendering of the screen share container with always rendering it, but hide when not sharing */}
+      <div
+        className="screen-share-container"
+        style={{ display: isSharingScreen ? "block" : "none" }}
+      >
+        <video
+          ref={screenShareContainerRef}
+          id="my-screen-share-content-video"
+          style={{ width: "100%", height: "auto" }}
+          autoPlay
+          muted
+        />
+      </div>
+      {isRemoteSharing && (
+        <div className="remote-share-container">
+          <canvas
+            ref={remoteShareContainerRef}
+            id="users-screen-share-content-canvas"
+            style={{ width: "100%", height: "auto" }}
+          />
+        </div>
+      )}
+
+      {/* Video grid as before */}
       <div className="video-grid">
         {participants.map((user) => (
           <div className="video-tile" key={user.userId}>
@@ -276,6 +404,7 @@ const MeetingPage = () => {
           </div>
         ))}
       </div>
+
       <div className="control-bar">
         <button onClick={toggleAudio}>
           {isAudioOn ? <FaMicrophone /> : <FaMicrophoneSlash />}
@@ -294,8 +423,20 @@ const MeetingPage = () => {
         <button onClick={() => handleModal("chat", true)}>
           <FaCommentDots />
         </button>
+        {/* Screen Share Button */}
+        <button onClick={handleScreenShare}>
+          {isSharingScreen ? "Stop Share" : "Share Screen"}
+        </button>
+        {/* Annotation Button (only show if sharing or viewing share) */}
+        {(isSharingScreen || isRemoteSharing) &&
+          (isAnnotating ? (
+            <button onClick={stopAnnotation}>Stop Annotation</button>
+          ) : (
+            <button onClick={handleStartAnnotation}>Annotate</button>
+          ))}
         <button className="leave" onClick={() => navigate("/")}>
-          <FaSignOutAlt /> Leave
+          {" "}
+          <FaSignOutAlt /> Leave{" "}
         </button>
       </div>
       {showModals.chat && (
@@ -336,6 +477,7 @@ const MeetingPage = () => {
           </div>
         </div>
       )}
+      {annotationError && <div className="error-page">{annotationError}</div>}
     </div>
   );
 };
