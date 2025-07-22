@@ -12,6 +12,7 @@ import {
   FaUsers,
   FaCommentDots,
   FaSignOutAlt,
+  FaChevronUp,
 } from "react-icons/fa";
 
 const MeetingPage = () => {
@@ -32,6 +33,7 @@ const MeetingPage = () => {
     chat: false,
   });
   const [chatInput, setChatInput] = useState("");
+  const [showVideoOptions, setShowVideoOptions] = useState(false);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [isRemoteSharing, setIsRemoteSharing] = useState(false);
   const [isAnnotating, setIsAnnotating] = useState(false);
@@ -406,35 +408,58 @@ const MeetingPage = () => {
       </div>
 
       <div className="control-bar">
-        <button onClick={toggleAudio}>
+        <button className="control-button" onClick={toggleAudio}>
           {isAudioOn ? <FaMicrophone /> : <FaMicrophoneSlash />}
         </button>
-        <button onClick={toggleVideo}>
-          {isVideoOn ? <FaVideo /> : <FaVideoSlash />}
-        </button>
-        <button onClick={() => handleModal("participants", true)}>
+        <div className="control-button video-control-group">
+          <button onClick={toggleVideo}>
+            {isVideoOn ? <FaVideo /> : <FaVideoSlash />}
+          </button>
+          <button
+            className="video-options-toggle"
+            onClick={() => setShowVideoOptions(!showVideoOptions)}
+          >
+            <FaChevronUp />
+          </button>
+          {showVideoOptions && (
+            <div className="video-options-menu">
+              <label>Virtual Background</label>
+              <select value={bgMode} onChange={handleBgChange}>
+                <option value="none">None</option>
+                <option value="blur">Blur</option>
+                <option value="image">Image</option>
+              </select>
+            </div>
+          )}
+        </div>
+        <button
+          className="control-button"
+          onClick={() => handleModal("participants", true)}
+        >
           <FaUsers />
         </button>
-        <select value={bgMode} onChange={handleBgChange}>
-          <option value="none">No BG</option>
-          <option value="blur">Blur</option>
-          <option value="image">Image</option>
-        </select>
-        <button onClick={() => handleModal("chat", true)}>
+        <button
+          className="control-button"
+          onClick={() => handleModal("chat", true)}
+        >
           <FaCommentDots />
         </button>
         {/* Screen Share Button */}
-        <button onClick={handleScreenShare}>
+        <button className="control-button" onClick={handleScreenShare}>
           {isSharingScreen ? "Stop Share" : "Share Screen"}
         </button>
         {/* Annotation Button (only show if sharing or viewing share) */}
         {(isSharingScreen || isRemoteSharing) &&
           (isAnnotating ? (
-            <button onClick={stopAnnotation}>Stop Annotation</button>
+            <button className="control-button" onClick={stopAnnotation}>
+              Stop Annotation
+            </button>
           ) : (
-            <button onClick={handleStartAnnotation}>Annotate</button>
+            <button className="control-button" onClick={handleStartAnnotation}>
+              Annotate
+            </button>
           ))}
-        <button className="leave" onClick={() => navigate("/")}>
+        <button className="control-button leave" onClick={() => navigate("/")}>
           {" "}
           <FaSignOutAlt /> Leave{" "}
         </button>

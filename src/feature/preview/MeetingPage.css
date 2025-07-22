@@ -111,32 +111,33 @@ video-player-container {
   padding: 18px 0;
   background-color: #1c1c1c;
   border-top: 1px solid #444;
-  gap: 32px;
+  gap: 12px; /* A smaller gap might look better */
   width: 100%;
   box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.12);
 }
 
+/* Base style for all control buttons, with a consistent width and height */
 .control-button {
-  background: none;
-  border: none;
-  color: white;
-  font-size: 14px;
-  cursor: pointer;
-  padding: 8px 18px 4px 18px;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
   align-items: center;
-  transition:
-    background 0.2s,
-    color 0.2s;
-  position: relative;
-  min-width: 64px;
+  justify-content: center;
+  height: 48px; /* Consistent height for all buttons */
+  width: 140px; /* Consistent width for all buttons */
+  padding: 0 15px; /* Horizontal padding */
+  background-color: #0e71eb;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+  position: relative; /* For dropdowns */
+  gap: 8px;
 }
 
 .control-button:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #00baff;
+  background-color: #0d65d2;
 }
 
 .control-label {
@@ -148,16 +149,9 @@ video-player-container {
 
 .control-button.leave {
   background-color: #ff4b5c;
-  color: white;
-  font-weight: bold;
-  border-radius: 10px;
-  margin-left: 32px;
-  box-shadow: 0 2px 8px rgba(255, 75, 92, 0.15);
 }
-
 .control-button.leave:hover {
   background-color: #e60026;
-  color: #fff;
 }
 
 /* --- Modals --- */
@@ -196,4 +190,71 @@ canvas {
   max-width: 100%;
   border-radius: 12px;
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.2);
+}
+
+/* The video group inherits the size from .control-button.
+   We just reset padding and arrange its children. */
+.video-control-group {
+  padding: 0;
+  gap: 0;
+  justify-content: space-between;
+}
+
+/* Reset and style the buttons INSIDE the video group */
+.video-control-group > button {
+  all: unset; /* Start from a blank slate */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%; /* Take full height of parent */
+  color: white;
+  cursor: pointer;
+}
+
+/* Let the main video button take up the available space */
+.video-control-group > button:first-of-type {
+  flex-grow: 1;
+}
+
+/* Style the chevron button on the right */
+.video-options-toggle {
+  padding: 0 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.25);
+  transition: background-color 0.2s;
+}
+
+/* Subtle hover for the inner parts of the video button */
+.video-options-toggle:hover,
+.video-control-group > button:first-of-type:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.video-options-menu {
+  position: absolute;
+  bottom: calc(100% + 8px); /* A bit more space */
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #333;
+  border-radius: 8px;
+  padding: 15px;
+  z-index: 1000;
+  width: 200px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.video-options-menu label {
+  color: #fff;
+  font-size: 14px;
+}
+
+.video-options-menu select {
+  background-color: #444;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+  padding: 8px;
+  width: 100%;
 }
