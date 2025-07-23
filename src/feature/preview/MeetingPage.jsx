@@ -13,6 +13,9 @@ import {
   FaCommentDots,
   FaSignOutAlt,
   FaChevronUp,
+  FaCamera,
+  FaVolumeUp,
+  FaVolumeMute,
 } from "react-icons/fa";
 
 const MeetingPage = () => {
@@ -43,6 +46,14 @@ const MeetingPage = () => {
   const [recordingStatus, setRecordingStatus] = useState("stopped"); // "stopped" | "recording" | "paused"
   const [showRecordingNotice, setShowRecordingNotice] = useState(false);
   const recordingClientRef = useRef(null);
+  const [videoDevices, setVideoDevices] = useState([]);
+  const [audioDevices, setAudioDevices] = useState([]);
+  const [speakerDevices, setSpeakerDevices] = useState([]);
+  const [selectedCamera, setSelectedCamera] = useState("");
+  const [selectedMic, setSelectedMic] = useState("");
+  const [selectedSpeaker, setSelectedSpeaker] = useState("");
+  const [permissionError, setPermissionError] = useState("");
+  const [activeSpeakerId, setActiveSpeakerId] = useState(null);
 
   // Refs
   const clientRef = useRef(null);
@@ -96,6 +107,38 @@ const MeetingPage = () => {
     const client = getClient();
     clientRef.current = client;
 
+    // Fetch devices and set state
+    const fetchDevices = async () => {
+      try {
+        const devices = await ZoomVideo.getDevices();
+        const cams = devices.filter((d) => d.kind === "videoinput");
+        const mics = devices.filter((d) => d.kind === "audioinput");
+        const speakers = devices.filter((d) => d.kind === "audiooutput");
+        setVideoDevices(cams);
+        setAudioDevices(mics);
+        setSpeakerDevices(speakers);
+        if (!selectedCamera && cams[0]) setSelectedCamera(cams[0].deviceId);
+        if (!selectedMic && mics[0]) setSelectedMic(mics[0].deviceId);
+        if (!selectedSpeaker && speakers[0])
+          setSelectedSpeaker(speakers[0].deviceId);
+      } catch (err) {
+        setError(
+          "Failed to fetch devices. Please check your camera and microphone permissions."
+        );
+      }
+    };
+    fetchDevices();
+
+    // Listen for device-change event
+    client.on("device-change", fetchDevices);
+
+    // Listen for permission-change event
+    client.on("permission-change", (payload) => {
+      setPermissionError(
+        "Camera or microphone permission changed. Please re-authorize in your browser settings."
+      );
+    });
+
     const getSignature = async () => {
       try {
         const response = await axios.post(
@@ -145,6 +188,8 @@ const MeetingPage = () => {
         if (!signature) return;
 
         await client.join(sessionName, signature, userName);
+        // Leave on page unload
+        if (client.leaveOnPageUnload) client.leaveOnPageUnload();
         mediaStreamRef.current = client.getMediaStream();
         selfUserIdRef.current = client.getCurrentUserInfo().userId;
         setParticipants(client.getAllUser());
@@ -160,6 +205,13 @@ const MeetingPage = () => {
             setIsVideoOn(true);
             await attachVideo(selfUserIdRef.current);
           } catch (e) {
+            if (e?.errorCode === 6105) {
+              // Camera is still starting, show a small message and optionally retry
+              setError("Camera is still starting, please wait and try again.");
+              // Optionally, retry after 1 second:
+              // setTimeout(() => toggleVideo(), 1000);
+              return;
+            }
             console.error("Failed to start self video", e);
             setError("Could not start camera. Check permissions.");
           }
@@ -173,14 +225,14 @@ const MeetingPage = () => {
 
           // Cloud recording logic
           recordingClientRef.current = client.getRecordingClient();
-          // Start recording automatically if host
-          if (isHost && recordingClientRef.current.canStartRecording()) {
-            const res = await recordingClientRef.current.startCloudRecording();
-            if (res === "") {
-              setRecordingStatus("recording");
-              setShowRecordingNotice(true);
-            }
-          }
+          // REMOVE: Start recording automatically if host
+          // if (isHost && recordingClientRef.current.canStartRecording()) {
+          //   const res = await recordingClientRef.current.startCloudRecording();
+          //   if (res === "") {
+          //     setRecordingStatus("recording");
+          //     setShowRecordingNotice(true);
+          //   }
+          // }
           // If not host, just show the notice if recording is active
           if (
             !isHost &&
@@ -230,6 +282,11 @@ const MeetingPage = () => {
       }
     );
 
+    // Listen for active speaker changes
+    client.on("video-active-change", (payload) => {
+      setActiveSpeakerId(payload.userId);
+    });
+
     return () => {
       if (clientRef.current) {
         clientRef.current.leave();
@@ -237,6 +294,22 @@ const MeetingPage = () => {
       zoomCleanup();
     };
   }, []);
+
+  // Effect to start recording when more than one user is present
+  useEffect(() => {
+    if (!isHost || !recordingClientRef.current) return;
+    if (recordingStatus !== "recording" && participants.length > 1) {
+      (async () => {
+        if (recordingClientRef.current.canStartRecording()) {
+          const res = await recordingClientRef.current.startCloudRecording();
+          if (res === "") {
+            setRecordingStatus("recording");
+            setShowRecordingNotice(true);
+          }
+        }
+      })();
+    }
+  }, [participants.length, isHost, recordingStatus]);
 
   const toggleAudio = useCallback(async () => {
     if (mediaStreamRef.current) {
@@ -348,6 +421,11 @@ const MeetingPage = () => {
         console.log("Screen sharing stopped");
       }
     } catch (err) {
+      if (err?.reason === "user deny screen share" || err?.errorCode === 6200) {
+        // User cancelled, do nothing or show a toast/snackbar
+        setIsSharingScreen(false);
+        return;
+      }
       setError("Screen share failed.");
       setIsSharingScreen(false);
       console.log("Screen share error", err);
@@ -445,14 +523,61 @@ const MeetingPage = () => {
         </div>
       )}
 
-      {/* Video grid as before */}
-      <div className="video-grid">
+      {/* Video grid or sidebar */}
+      <div
+        className={
+          (isSharingScreen ? "video-sidebar" : "video-grid") +
+          (participants.length === 1 && !isSharingScreen
+            ? " single-participant"
+            : "")
+        }
+      >
         {participants.map((user) => (
-          <div className="video-tile" key={user.userId}>
+          <div
+            className={
+              "video-tile" +
+              (user.userId === activeSpeakerId && !isSharingScreen
+                ? " active-speaker"
+                : "")
+            }
+            key={user.userId}
+          >
             <video-player-container
               ref={(el) => (videoContainerRefs.current[user.userId] = el)}
             ></video-player-container>
-            <div className="user-label">{user.displayName}</div>
+            <div className="user-label">
+              {user.displayName}
+              {(
+                user.userId === selfUserIdRef.current
+                  ? isAudioOn
+                  : user.bAudioOn
+              ) ? (
+                <FaMicrophone
+                  style={{ marginLeft: 6, color: "#0f0" }}
+                  title="Mic On"
+                />
+              ) : (
+                <FaMicrophoneSlash
+                  style={{ marginLeft: 6, color: "#f00" }}
+                  title="Mic Off"
+                />
+              )}
+              {(
+                user.userId === selfUserIdRef.current
+                  ? isVideoOn
+                  : user.bVideoOn
+              ) ? (
+                <FaVideo
+                  style={{ marginLeft: 6, color: "#0f0" }}
+                  title="Camera On"
+                />
+              ) : (
+                <FaVideoSlash
+                  style={{ marginLeft: 6, color: "#f00" }}
+                  title="Camera Off"
+                />
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -465,30 +590,128 @@ const MeetingPage = () => {
       )}
 
       <div className="control-bar">
-        <button className="control-button" onClick={toggleAudio}>
-          {isAudioOn ? <FaMicrophone /> : <FaMicrophoneSlash />}
-        </button>
-        <div className="control-button video-control-group">
+        {/* Mic button with dropdown for mic and speaker selection */}
+        <div
+          className="control-button video-control-group"
+          style={{ position: "relative", marginRight: 8 }}
+        >
+          <button onClick={toggleAudio}>
+            {isAudioOn ? <FaMicrophone /> : <FaMicrophoneSlash />}
+          </button>
+          <button
+            className="video-options-toggle"
+            onClick={() =>
+              setShowVideoOptions(showVideoOptions === "mic" ? null : "mic")
+            }
+          >
+            <FaChevronUp />
+          </button>
+          {showVideoOptions === "mic" && (
+            <div
+              className="video-options-menu"
+              style={{ left: 0, minWidth: 200 }}
+            >
+              <label style={{ display: "block", marginBottom: 8 }}>
+                Microphone:
+                <select
+                  value={selectedMic}
+                  onChange={async (e) => {
+                    setSelectedMic(e.target.value);
+                    if (mediaStreamRef.current) {
+                      await mediaStreamRef.current.switchMicrophone(
+                        e.target.value
+                      );
+                    }
+                  }}
+                  style={{ width: "100%" }}
+                >
+                  {audioDevices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: "block" }}>
+                Speaker:
+                <select
+                  value={selectedSpeaker}
+                  onChange={async (e) => {
+                    setSelectedSpeaker(e.target.value);
+                    if (mediaStreamRef.current) {
+                      await mediaStreamRef.current.switchSpeaker(
+                        e.target.value
+                      );
+                    }
+                  }}
+                  style={{ width: "100%" }}
+                >
+                  {speakerDevices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+        </div>
+        {/* Camera button with dropdown for camera and background selection */}
+        <div
+          className="control-button video-control-group"
+          style={{ position: "relative", marginRight: 8 }}
+        >
           <button onClick={toggleVideo}>
             {isVideoOn ? <FaVideo /> : <FaVideoSlash />}
           </button>
           <button
             className="video-options-toggle"
-            onClick={() => setShowVideoOptions(!showVideoOptions)}
+            onClick={() =>
+              setShowVideoOptions(showVideoOptions === "video" ? null : "video")
+            }
           >
             <FaChevronUp />
           </button>
-          {showVideoOptions && (
-            <div className="video-options-menu">
-              <label>Virtual Background</label>
-              <select value={bgMode} onChange={handleBgChange}>
-                <option value="none">None</option>
-                <option value="blur">Blur</option>
-                <option value="image">Image</option>
-              </select>
+          {showVideoOptions === "video" && (
+            <div
+              className="video-options-menu"
+              style={{ left: 0, minWidth: 200 }}
+            >
+              <label style={{ display: "block", marginBottom: 8 }}>
+                Camera:
+                <select
+                  value={selectedCamera}
+                  onChange={async (e) => {
+                    setSelectedCamera(e.target.value);
+                    if (mediaStreamRef.current) {
+                      await mediaStreamRef.current.switchCamera(e.target.value);
+                    }
+                  }}
+                  style={{ width: "100%" }}
+                >
+                  {videoDevices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: "block" }}>
+                Virtual Background:
+                <select
+                  value={bgMode}
+                  onChange={handleBgChange}
+                  style={{ width: "100%" }}
+                >
+                  <option value="none">None</option>
+                  <option value="blur">Blur</option>
+                  <option value="image">Image</option>
+                </select>
+              </label>
             </div>
           )}
         </div>
+        {/* The rest of the control bar buttons remain unchanged */}
         <button
           className="control-button"
           onClick={() => handleModal("participants", true)}
@@ -582,13 +805,47 @@ const MeetingPage = () => {
             <h3>Participants ({participants.length})</h3>
             <ul>
               {participants.map((p) => (
-                <li key={p.userId}>{p.displayName}</li>
+                <li key={p.userId}>
+                  {p.displayName}
+                  {(
+                    p.userId === selfUserIdRef.current ? isAudioOn : p.bAudioOn
+                  ) ? (
+                    <FaMicrophone
+                      style={{ marginLeft: 6, color: "#0f0" }}
+                      title="Mic On"
+                    />
+                  ) : (
+                    <FaMicrophoneSlash
+                      style={{ marginLeft: 6, color: "#f00" }}
+                      title="Mic Off"
+                    />
+                  )}
+                  {(
+                    p.userId === selfUserIdRef.current ? isVideoOn : p.bVideoOn
+                  ) ? (
+                    <FaVideo
+                      style={{ marginLeft: 6, color: "#0f0" }}
+                      title="Camera On"
+                    />
+                  ) : (
+                    <FaVideoSlash
+                      style={{ marginLeft: 6, color: "#f00" }}
+                      title="Camera Off"
+                    />
+                  )}
+                </li>
               ))}
             </ul>
           </div>
         </div>
       )}
       {annotationError && <div className="error-page">{annotationError}</div>}
+      {permissionError && (
+        <div className="error-page">
+          {permissionError}{" "}
+          <button onClick={() => setPermissionError("")}>Dismiss</button>
+        </div>
+      )}
     </div>
   );
 };
