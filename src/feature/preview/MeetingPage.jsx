@@ -16,6 +16,7 @@ import {
   FaCamera,
   FaVolumeUp,
   FaVolumeMute,
+  FaSignal,
 } from "react-icons/fa";
 
 const MeetingPage = () => {
@@ -54,6 +55,20 @@ const MeetingPage = () => {
   const [selectedSpeaker, setSelectedSpeaker] = useState("");
   const [permissionError, setPermissionError] = useState("");
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  // Notification helper (move this above useEffect)
+  const addNotification = useCallback((msg) => {
+    const id = Date.now() + Math.random();
+    setNotifications((prev) => {
+      const next = [...prev, { id, msg }];
+      return next.slice(-4); // Limit to last 4
+    });
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+    }, 4000);
+  }, []);
+  const [networkQuality, setNetworkQuality] = useState({}); // { userId: level }
+  const aspectRatioRefs = useRef({}); // { userId: aspectRatio }
 
   // Refs
   const clientRef = useRef(null);
@@ -287,11 +302,114 @@ const MeetingPage = () => {
       setActiveSpeakerId(payload.userId);
     });
 
+    // User join/leave notifications
+    const handleUserAdded = (payload) => {
+      payload.forEach((item) => {
+        addNotification(
+          `${item.displayName || item.userId} joined the session.`
+        );
+      });
+      setParticipants(client.getAllUser());
+    };
+    const handleUserRemoved = (payload) => {
+      payload.forEach((item) => {
+        addNotification(`${item.displayName || item.userId} left the session.`);
+      });
+      setParticipants(client.getAllUser());
+    };
+    client.on("user-added", handleUserAdded);
+    client.on("user-removed", handleUserRemoved);
+
+    // Connection status handling
+    client.on("connection-change", (payload) => {
+      if (payload.state === "Closed") {
+        addNotification(
+          `Session ended: ${payload.reason || "Closed by host or network"}`
+        );
+        setError("Session ended. Please rejoin.");
+      } else if (payload.state === "Reconnecting") {
+        addNotification(`Reconnecting to session...`);
+      } else if (payload.state === "Connected") {
+        addNotification(`Connected to session.`);
+      } else if (payload.state === "Fail") {
+        addNotification(
+          `Session failed: ${payload.reason || payload.errorCode}`
+        );
+        setError("Session failed. Please refresh.");
+      }
+    });
+
+    // Device plug/unplug and permission changes
+    client.on("device-change", fetchDevices);
+    client.on("device-permission-change", (payload) => {
+      addNotification(`${payload.name} permission is ${payload.state}`);
+      if (payload.state === "denied") {
+        setError(
+          `${payload.name} permission denied. Please grant it in browser settings.`
+        );
+      }
+    });
+
+    // Media failure handling
+    client.on("active-media-failed", (payload) => {
+      addNotification(`Media error: ${payload.message || payload.code}`);
+      setError(`Media error: ${payload.message || payload.code}`);
+    });
+
+    // Audio/video state changes
+    client.on("current-audio-change", (payload) => {
+      if (payload.action === "Leave") {
+        addNotification(`Audio ended: ${payload.source}`);
+      } else if (payload.action === "Muted") {
+        addNotification(`Audio muted: ${payload.source}`);
+      }
+    });
+    client.on("user-updated", (payload) => {
+      payload.forEach((item) => {
+        addNotification(
+          `${item.displayName || item.userId} properties updated.`
+        );
+      });
+    });
+
+    // Auto-play audio failure
+    client.on("auto-play-audio-failed", () => {
+      addNotification(
+        `Audio playback blocked. Click anywhere to resume audio.`
+      );
+    });
+
+    // Network quality indicator
+    client.on("network-quality-change", (payload) => {
+      setNetworkQuality((prev) => ({
+        ...prev,
+        [payload.userId]: payload.level,
+      }));
+    });
+
+    // Dynamic video aspect ratio
+    client.on("video-aspect-ratio-change", (payload) => {
+      aspectRatioRefs.current[payload.userId] = payload.aspectRatio;
+      // Optionally, force a re-render
+      addNotification(`Aspect ratio changed for user ${payload.userId}`);
+    });
+
     return () => {
       if (clientRef.current) {
         clientRef.current.leave();
       }
       zoomCleanup();
+      client.off("user-added", handleUserAdded);
+      client.off("user-removed", handleUserRemoved);
+      client.off("connection-change");
+      client.off("device-change");
+      client.off("device-permission-change");
+      client.off("active-media-failed");
+      client.off("current-audio-change");
+      client.off("user-updated");
+      client.off("auto-play-audio-failed");
+      client.off("network-quality-change");
+      client.off("video-aspect-ratio-change");
     };
   }, []);
 
@@ -523,6 +641,56 @@ const MeetingPage = () => {
         </div>
       )}
 
+      {/* Notification toasts */}
+      <div style={{ position: "fixed", top: 16, right: 16, zIndex: 3000 }}>
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            style={{
+              background: "#222",
+              color: "#fff",
+              padding: 12,
+              borderRadius: 8,
+              marginBottom: 8,
+              boxShadow: "0 2px 8px #0006",
+              minWidth: 220,
+              position: "relative",
+              opacity: 1,
+              transition: "opacity 0.4s",
+              animation: "fadeInOut 4s",
+            }}
+          >
+            {n.msg}
+            <button
+              onClick={() =>
+                setNotifications((prev) => prev.filter((x) => x.id !== n.id))
+              }
+              style={{
+                position: "absolute",
+                top: 4,
+                right: 8,
+                background: "none",
+                border: "none",
+                color: "#fff",
+                fontSize: 16,
+                cursor: "pointer",
+              }}
+              aria-label="Close notification"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        <style>{`
+          @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateY(-10px); }
+            10% { opacity: 1; transform: translateY(0); }
+            90% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-10px); }
+          }
+        `}</style>
+      </div>
+
       {/* Video grid or sidebar */}
       <div
         className={
@@ -543,10 +711,31 @@ const MeetingPage = () => {
             key={user.userId}
           >
             <video-player-container
-              ref={(el) => (videoContainerRefs.current[user.userId] = el)}
+              ref={(el) => {
+                videoContainerRefs.current[user.userId] = el;
+                // Set aspect ratio if available
+                if (el && aspectRatioRefs.current[user.userId]) {
+                  el.style.aspectRatio = aspectRatioRefs.current[user.userId];
+                }
+              }}
             ></video-player-container>
             <div className="user-label">
               {user.displayName}
+              {/* Network quality icon */}
+              {networkQuality[user.userId] !== undefined && (
+                <FaSignal
+                  style={{
+                    marginLeft: 6,
+                    color:
+                      networkQuality[user.userId] >= 3
+                        ? "#0f0"
+                        : networkQuality[user.userId] === 2
+                          ? "#ff0"
+                          : "#f00",
+                  }}
+                  title={`Network: ${networkQuality[user.userId]}`}
+                />
+              )}
               {(
                 user.userId === selfUserIdRef.current
                   ? isAudioOn
