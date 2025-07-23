@@ -112,6 +112,17 @@ const Preview = () => {
       await localAudioTrack.start();
       await localAudioTrack.unmute();
     } catch (err) {
+      // Suppress the "play() request was interrupted" warning for the user
+      if (
+        err?.message?.includes(
+          "The play() request was interrupted by a new load request"
+        ) ||
+        err?.message?.includes("https://goo.gl/LdLk22")
+      ) {
+        // Only log to console, do not set user-facing error
+        console.warn("Preview warning:", err.message);
+        return;
+      }
       if (err.name === "NotReadableError") {
         setError(
           "Camera or microphone is already in use by another application. Please close other apps and try again."
@@ -129,8 +140,16 @@ const Preview = () => {
     const updateVB = async () => {
       if (!localVideoTrack) return;
       try {
-        // Always stop before switching
-        await localVideoTrack.stop();
+        // Only stop if the track is started (SDK may not expose isStarted, so try-catch is safest)
+        try {
+          await localVideoTrack.stop();
+        } catch (err) {
+          if (err.message && err.message.includes("VideoNotStartedError")) {
+            // Ignore, just proceed
+          } else {
+            throw err;
+          }
+        }
         if (bgMode === "none") {
           await localVideoTrack.start(videoRef.current);
           await localVideoTrack.updateVirtualBackground(undefined);
@@ -142,8 +161,31 @@ const Preview = () => {
           });
         }
       } catch (err) {
-        console.error("Error updating virtual background:", err);
-        setError("Failed to update virtual background.");
+        if (err.message && err.message.includes("VideoNotStartedError")) {
+          // Try to start the video anyway
+          try {
+            if (bgMode === "none") {
+              await localVideoTrack.start(videoRef.current);
+              await localVideoTrack.updateVirtualBackground(undefined);
+            } else if (bgMode === "blur") {
+              await localVideoTrack.start(canvasRef.current, {
+                imageUrl: "blur",
+              });
+            } else if (bgMode === "image") {
+              await localVideoTrack.start(canvasRef.current, {
+                imageUrl: "/lib/vb-resource/background.jpg",
+              });
+            }
+          } catch (e) {
+            setError(
+              "Failed to update virtual background: " + (e.reason || e.message)
+            );
+          }
+          return;
+        }
+        setError(
+          "Failed to update virtual background: " + (err.reason || err.message)
+        );
       }
     };
     // Only run if the video element or canvas is mounted
