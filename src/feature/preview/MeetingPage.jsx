@@ -69,6 +69,7 @@ const MeetingPage = () => {
   }, []);
   const [networkQuality, setNetworkQuality] = useState({}); // { userId: level }
   const aspectRatioRefs = useRef({}); // { userId: aspectRatio }
+  const [showEndMeetingConfirm, setShowEndMeetingConfirm] = useState(false);
 
   // Refs
   const clientRef = useRef(null);
@@ -331,7 +332,9 @@ const MeetingPage = () => {
     client.on("connection-change", (payload) => {
       if (payload.state === "Closed") {
         addNotification(
-          `Session ended: ${payload.reason || "Closed by host or network"}`
+          payload.reason === "ended by host"
+            ? "The host has ended the meeting."
+            : `Session ended: ${payload.reason || "Closed by host or network"}`
         );
         setError("Session ended. Please rejoin.");
       } else if (payload.state === "Reconnecting") {
@@ -606,6 +609,30 @@ const MeetingPage = () => {
       setRecordingStatus("stopped");
       setShowRecordingNotice(false);
     }
+  };
+
+  const handleEndMeeting = async () => {
+    setShowEndMeetingConfirm(true);
+  };
+  const confirmEndMeeting = async () => {
+    setShowEndMeetingConfirm(false);
+    if (clientRef.current) {
+      try {
+        await clientRef.current.leave(true); // Host ends session for all
+      } catch (err) {
+        setError("Failed to end meeting for all.");
+      }
+    }
+  };
+  const handleLeave = async () => {
+    if (clientRef.current) {
+      try {
+        await clientRef.current.leave(); // Participant leaves session
+      } catch (err) {
+        setError("Failed to leave meeting.");
+      }
+    }
+    navigate("/");
   };
 
   if (isJoining) return <div>Joining meeting...</div>;
@@ -1030,10 +1057,19 @@ const MeetingPage = () => {
             )}
           </>
         )}
-        <button className="control-button leave" onClick={() => navigate("/")}>
-          {" "}
-          <FaSignOutAlt /> Leave{" "}
-        </button>
+        {isHost ? (
+          <button
+            className="control-button leave"
+            onClick={handleEndMeeting}
+            style={{ background: "#e53935", color: "#fff" }}
+          >
+            <FaSignOutAlt /> End Meeting
+          </button>
+        ) : (
+          <button className="control-button leave" onClick={handleLeave}>
+            <FaSignOutAlt /> Leave
+          </button>
+        )}
       </div>
       {showModals.chat && (
         <div
@@ -1395,6 +1431,73 @@ const MeetingPage = () => {
         <div className="error-page">
           {permissionError}{" "}
           <button onClick={() => setPermissionError("")}>Dismiss</button>
+        </div>
+      )}
+      {showEndMeetingConfirm && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            background: "rgba(0,0,0,0.35)",
+            zIndex: 3000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: "32px 32px 24px 32px",
+              boxShadow: "0 4px 24px #0002",
+              minWidth: 320,
+              maxWidth: "90vw",
+              textAlign: "center",
+            }}
+          >
+            <h2 style={{ margin: "0 0 18px 0", fontWeight: 700, fontSize: 22 }}>
+              End Meeting?
+            </h2>
+            <div style={{ color: "#444", marginBottom: 28, fontSize: 16 }}>
+              Are you sure you want to end the meeting for all participants?
+            </div>
+            <div style={{ display: "flex", gap: 16, justifyContent: "center" }}>
+              <button
+                onClick={() => setShowEndMeetingConfirm(false)}
+                style={{
+                  background: "#f5f5f5",
+                  color: "#333",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "10px 24px",
+                  fontWeight: 600,
+                  fontSize: 16,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmEndMeeting}
+                style={{
+                  background: "#e53935",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "10px 24px",
+                  fontWeight: 600,
+                  fontSize: 16,
+                  cursor: "pointer",
+                }}
+              >
+                End Meeting
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
