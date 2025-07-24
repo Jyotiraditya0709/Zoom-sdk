@@ -435,11 +435,23 @@ const MeetingPage = () => {
 
   const toggleAudio = useCallback(async () => {
     if (mediaStreamRef.current) {
-      if (isAudioOn) await mediaStreamRef.current.muteAudio();
-      else await mediaStreamRef.current.unmuteAudio();
+      if (isAudioOn) {
+        await mediaStreamRef.current.muteAudio();
+      } else {
+        await mediaStreamRef.current.unmuteAudio();
+      }
       setIsAudioOn(!isAudioOn);
       // Force update participants to reflect local audio state
       if (clientRef.current) setParticipants(clientRef.current.getAllUser());
+      // Manually emit peer-audio-state-change for local user to update UI globally
+      if (clientRef.current) {
+        const event = new Event("peer-audio-state-change");
+        clientRef.current.emit &&
+          clientRef.current.emit("peer-audio-state-change", {
+            userId: selfUserIdRef.current,
+            action: isAudioOn ? "Muted" : "Unmuted",
+          });
+      }
     }
   }, [isAudioOn]);
 
@@ -735,7 +747,9 @@ const MeetingPage = () => {
             <div
               className={
                 "video-tile" +
-                (user.userId === activeSpeakerId && !isSharingScreen
+                (activeSpeakerId &&
+                user.userId === activeSpeakerId &&
+                !isSharingScreen
                   ? " active-speaker"
                   : "")
               }
@@ -807,7 +821,9 @@ const MeetingPage = () => {
             <div
               className={
                 "video-tile" +
-                (user.userId === activeSpeakerId ? " active-speaker" : "")
+                (activeSpeakerId && user.userId === activeSpeakerId
+                  ? " active-speaker"
+                  : "")
               }
               key={user.userId}
             >
