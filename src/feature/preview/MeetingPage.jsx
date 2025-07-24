@@ -190,6 +190,13 @@ const MeetingPage = () => {
         } else if (action === "Stop") {
           await detachVideo(userId);
         }
+        // Update participants state so UI reflects remote video changes
+        setParticipants(client.getAllUser());
+      });
+
+      // Add peer-audio-state-change listener to update participants state
+      client.on("peer-audio-state-change", () => {
+        setParticipants(client.getAllUser());
       });
     };
 
@@ -364,13 +371,6 @@ const MeetingPage = () => {
         addNotification(`Audio muted: ${payload.source}`);
       }
     });
-    client.on("user-updated", (payload) => {
-      payload.forEach((item) => {
-        addNotification(
-          `${item.displayName || item.userId} properties updated.`
-        );
-      });
-    });
 
     // Auto-play audio failure
     client.on("auto-play-audio-failed", () => {
@@ -391,7 +391,8 @@ const MeetingPage = () => {
     client.on("video-aspect-ratio-change", (payload) => {
       aspectRatioRefs.current[payload.userId] = payload.aspectRatio;
       // Optionally, force a re-render
-      addNotification(`Aspect ratio changed for user ${payload.userId}`);
+      // Removed notification for aspect ratio change
+      // addNotification(`Aspect ratio changed for user ${payload.userId}`);
     });
 
     return () => {
@@ -692,84 +693,154 @@ const MeetingPage = () => {
       </div>
 
       {/* Video grid or sidebar */}
-      <div
-        className={
-          (isSharingScreen ? "video-sidebar" : "video-grid") +
-          (participants.length === 1 && !isSharingScreen
-            ? " single-participant"
-            : "")
-        }
-      >
-        {participants.map((user) => (
-          <div
-            className={
-              "video-tile" +
-              (user.userId === activeSpeakerId && !isSharingScreen
-                ? " active-speaker"
-                : "")
-            }
-            key={user.userId}
-          >
-            <video-player-container
-              ref={(el) => {
-                videoContainerRefs.current[user.userId] = el;
-                // Set aspect ratio if available
-                if (el && aspectRatioRefs.current[user.userId]) {
-                  el.style.aspectRatio = aspectRatioRefs.current[user.userId];
-                }
-              }}
-            ></video-player-container>
-            <div className="user-label">
-              {user.displayName}
-              {/* Network quality icon */}
-              {networkQuality[user.userId] !== undefined && (
-                <FaSignal
-                  style={{
-                    marginLeft: 6,
-                    color:
-                      networkQuality[user.userId] >= 3
-                        ? "#0f0"
-                        : networkQuality[user.userId] === 2
-                          ? "#ff0"
-                          : "#f00",
-                  }}
-                  title={`Network: ${networkQuality[user.userId]}`}
-                />
-              )}
-              {(
-                user.userId === selfUserIdRef.current
-                  ? isAudioOn
-                  : user.bAudioOn
-              ) ? (
-                <FaMicrophone
-                  style={{ marginLeft: 6, color: "#0f0" }}
-                  title="Mic On"
-                />
-              ) : (
-                <FaMicrophoneSlash
-                  style={{ marginLeft: 6, color: "#f00" }}
-                  title="Mic Off"
-                />
-              )}
-              {(
-                user.userId === selfUserIdRef.current
-                  ? isVideoOn
-                  : user.bVideoOn
-              ) ? (
-                <FaVideo
-                  style={{ marginLeft: 6, color: "#0f0" }}
-                  title="Camera On"
-                />
-              ) : (
-                <FaVideoSlash
-                  style={{ marginLeft: 6, color: "#f00" }}
-                  title="Camera Off"
-                />
-              )}
+      {isSharingScreen ? (
+        <div
+          className={
+            (isSharingScreen ? "video-sidebar" : "video-grid") +
+            (participants.length === 1 && !isSharingScreen
+              ? " single-participant"
+              : "")
+          }
+        >
+          {participants.map((user) => (
+            <div
+              className={
+                "video-tile" +
+                (user.userId === activeSpeakerId && !isSharingScreen
+                  ? " active-speaker"
+                  : "")
+              }
+              key={user.userId}
+            >
+              <video-player-container
+                ref={(el) => {
+                  videoContainerRefs.current[user.userId] = el;
+                  // Set aspect ratio if available
+                  if (el && aspectRatioRefs.current[user.userId]) {
+                    el.style.aspectRatio = aspectRatioRefs.current[user.userId];
+                  }
+                }}
+              ></video-player-container>
+              <div className="user-label">
+                {user.displayName}
+                {/* Network quality icon */}
+                {networkQuality[user.userId] !== undefined && (
+                  <FaSignal
+                    style={{
+                      marginLeft: 6,
+                      color:
+                        networkQuality[user.userId] >= 3
+                          ? "#0f0"
+                          : networkQuality[user.userId] === 2
+                            ? "#ff0"
+                            : "#f00",
+                    }}
+                    title={`Network: ${networkQuality[user.userId]}`}
+                  />
+                )}
+                {(
+                  user.userId === selfUserIdRef.current
+                    ? isAudioOn
+                    : user.bAudioOn
+                ) ? (
+                  <FaMicrophone
+                    style={{ marginLeft: 6, color: "#0f0" }}
+                    title="Mic On"
+                  />
+                ) : (
+                  <FaMicrophoneSlash
+                    style={{ marginLeft: 6, color: "#f00" }}
+                    title="Mic Off"
+                  />
+                )}
+                {(
+                  user.userId === selfUserIdRef.current
+                    ? isVideoOn
+                    : user.bVideoOn
+                ) ? (
+                  <FaVideo
+                    style={{ marginLeft: 6, color: "#0f0" }}
+                    title="Camera On"
+                  />
+                ) : (
+                  <FaVideoSlash
+                    style={{ marginLeft: 6, color: "#f00" }}
+                    title="Camera Off"
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="video-grid">
+          {participants.slice(0, 4).map((user) => (
+            <div
+              className={
+                "video-tile" +
+                (user.userId === activeSpeakerId ? " active-speaker" : "")
+              }
+              key={user.userId}
+            >
+              <video-player-container
+                ref={(el) => {
+                  videoContainerRefs.current[user.userId] = el;
+                  if (el && aspectRatioRefs.current[user.userId]) {
+                    el.style.aspectRatio = aspectRatioRefs.current[user.userId];
+                  }
+                }}
+              ></video-player-container>
+              <div className="user-label">
+                {user.displayName}
+                {networkQuality[user.userId] !== undefined && (
+                  <FaSignal
+                    style={{
+                      marginLeft: 6,
+                      color:
+                        networkQuality[user.userId] >= 3
+                          ? "#0f0"
+                          : networkQuality[user.userId] === 2
+                            ? "#ff0"
+                            : "#f00",
+                    }}
+                    title={`Network: ${networkQuality[user.userId]}`}
+                  />
+                )}
+                {(
+                  user.userId === selfUserIdRef.current
+                    ? isAudioOn
+                    : user.bAudioOn
+                ) ? (
+                  <FaMicrophone
+                    style={{ marginLeft: 6, color: "#0f0" }}
+                    title="Mic On"
+                  />
+                ) : (
+                  <FaMicrophoneSlash
+                    style={{ marginLeft: 6, color: "#f00" }}
+                    title="Mic Off"
+                  />
+                )}
+                {(
+                  user.userId === selfUserIdRef.current
+                    ? isVideoOn
+                    : user.bVideoOn
+                ) ? (
+                  <FaVideo
+                    style={{ marginLeft: 6, color: "#0f0" }}
+                    title="Camera On"
+                  />
+                ) : (
+                  <FaVideoSlash
+                    style={{ marginLeft: 6, color: "#f00" }}
+                    title="Camera Off"
+                  />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {showRecordingNotice && (
         <div className="recording-notice">
