@@ -435,6 +435,8 @@ const MeetingPage = () => {
       if (isAudioOn) await mediaStreamRef.current.muteAudio();
       else await mediaStreamRef.current.unmuteAudio();
       setIsAudioOn(!isAudioOn);
+      // Force update participants to reflect local audio state
+      if (clientRef.current) setParticipants(clientRef.current.getAllUser());
     }
   }, [isAudioOn]);
 
@@ -1034,69 +1036,358 @@ const MeetingPage = () => {
         </button>
       </div>
       {showModals.chat && (
-        <div className="modal" onClick={() => handleModal("chat", false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3>Chat</h3>
-            <div className="chat-messages">
-              {chatMessages.map((msg, i) => (
-                <div key={i}>
-                  <strong>{msg.sender}:</strong> {msg.content}
-                </div>
-              ))}
+        <div
+          className="modal chat-modal"
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            height: "100%",
+            width: 340,
+            background: "#fff",
+            boxShadow: "-2px 0 12px #0002",
+            zIndex: 2100,
+            display: "flex",
+            flexDirection: "column",
+            borderLeft: "1px solid #e0e0e0",
+            padding: 0,
+            animation: "slideInRight 0.3s",
+          }}
+          onClick={() => handleModal("chat", false)}
+        >
+          <div
+            className="modal-content"
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              padding: 0,
+              background: "#f8f9fa",
+              borderRadius: 0,
+              boxShadow: "none",
+              minWidth: 0,
+              minHeight: 0,
+              height: "100%",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "18px 24px 12px 24px",
+                borderBottom: "1px solid #e0e0e0",
+                background: "#fff",
+              }}
+            >
+              <h3 style={{ margin: 0, fontWeight: 600, fontSize: 20 }}>Chat</h3>
+              <button
+                onClick={() => handleModal("chat", false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 22,
+                  color: "#888",
+                  cursor: "pointer",
+                  marginLeft: 8,
+                }}
+                aria-label="Close chat panel"
+              >
+                ×
+              </button>
             </div>
-            <form onSubmit={sendChatMessage}>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "16px 0 0 0",
+                minHeight: 0,
+              }}
+            >
+              {chatMessages.length === 0 ? (
+                <div
+                  style={{ color: "#888", textAlign: "center", marginTop: 32 }}
+                >
+                  No messages yet.
+                </div>
+              ) : (
+                chatMessages.map((msg, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      padding: "8px 24px 8px 24px",
+                      fontSize: 15,
+                      gap: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        color: "#226",
+                        minWidth: 60,
+                        flexShrink: 0,
+                        textAlign: "right",
+                        marginRight: 8,
+                      }}
+                    >
+                      {msg.sender}:
+                    </div>
+                    <div
+                      style={{
+                        color: "#222",
+                        wordBreak: "break-word",
+                        flex: 1,
+                      }}
+                    >
+                      {msg.content}
+                    </div>
+                    <div
+                      style={{
+                        color: "#aaa",
+                        fontSize: 12,
+                        marginLeft: 8,
+                        minWidth: 48,
+                        textAlign: "right",
+                      }}
+                    >
+                      {msg.timestamp}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <form
+              onSubmit={sendChatMessage}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                padding: "18px 24px 18px 24px",
+                borderTop: "1px solid #e0e0e0",
+                background: "#fff",
+                position: "relative",
+              }}
+            >
               <input
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Type a message..."
+                style={{
+                  padding: "10px 12px",
+                  border: "1px solid #cfd8dc",
+                  borderRadius: 8,
+                  fontSize: 15,
+                  outline: "none",
+                  marginBottom: 0,
+                  background: "#f8f9fa",
+                  width: "100%",
+                  boxSizing: "border-box",
+                  color: "#222", // Ensure text is visible
+                }}
                 autoFocus
               />
-              <button type="submit">Send</button>
+              <button
+                type="submit"
+                style={{
+                  background: "#1976f6",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "10px 0",
+                  fontWeight: 600,
+                  fontSize: 16,
+                  cursor: "pointer",
+                  transition: "background 0.2s",
+                  marginTop: 0,
+                  width: "100%",
+                }}
+              >
+                Send
+              </button>
             </form>
           </div>
+          <style>{`
+            @keyframes slideInRight {
+              from { transform: translateX(100%); opacity: 0; }
+              to { transform: translateX(0); opacity: 1; }
+            }
+          `}</style>
         </div>
       )}
       {showModals.participants && (
         <div
-          className="modal"
+          className="modal participants-modal"
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            height: "100%",
+            width: 340,
+            background: "#fff",
+            boxShadow: "-2px 0 12px #0002",
+            zIndex: 2000,
+            display: "flex",
+            flexDirection: "column",
+            borderLeft: "1px solid #e0e0e0",
+            padding: 0,
+            animation: "slideInRight 0.3s",
+          }}
           onClick={() => handleModal("participants", false)}
         >
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3>Participants ({participants.length})</h3>
-            <ul>
-              {participants.map((p) => (
-                <li key={p.userId}>
-                  {p.displayName}
-                  {(
-                    p.userId === selfUserIdRef.current ? isAudioOn : p.bAudioOn
-                  ) ? (
-                    <FaMicrophone
-                      style={{ marginLeft: 6, color: "#0f0" }}
-                      title="Mic On"
-                    />
-                  ) : (
-                    <FaMicrophoneSlash
-                      style={{ marginLeft: 6, color: "#f00" }}
-                      title="Mic Off"
-                    />
-                  )}
-                  {(
-                    p.userId === selfUserIdRef.current ? isVideoOn : p.bVideoOn
-                  ) ? (
-                    <FaVideo
-                      style={{ marginLeft: 6, color: "#0f0" }}
-                      title="Camera On"
-                    />
-                  ) : (
-                    <FaVideoSlash
-                      style={{ marginLeft: 6, color: "#f00" }}
-                      title="Camera Off"
-                    />
-                  )}
-                </li>
+          <div
+            className="modal-content"
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              padding: 0,
+              background: "#f8f9fa",
+              borderRadius: 0,
+              boxShadow: "none",
+              minWidth: 0,
+              minHeight: 0,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "18px 24px 12px 24px",
+                borderBottom: "1px solid #e0e0e0",
+                background: "#fff",
+              }}
+            >
+              <h3 style={{ margin: 0, fontWeight: 600, fontSize: 20 }}>
+                Participants ({participants.length})
+              </h3>
+              <button
+                onClick={() => handleModal("participants", false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 22,
+                  color: "#888",
+                  cursor: "pointer",
+                  marginLeft: 8,
+                }}
+                aria-label="Close participants panel"
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "16px 0" }}>
+              {participants.map((p, idx) => (
+                <div
+                  key={p.userId}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    background: idx % 2 === 0 ? "#fff" : "#f3f4f6",
+                    padding: "12px 24px",
+                    borderBottom: "1px solid #f0f0f0",
+                    fontSize: 16,
+                    minHeight: 56,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: "50%",
+                      background: "#e3e7ed",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: 600,
+                      fontSize: 18,
+                      color: "#3a3a3a",
+                      marginRight: 16,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {p.displayName?.[0] || "?"}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span
+                      style={{
+                        fontWeight: 500,
+                        color: "#222",
+                        fontSize: 16,
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {p.displayName}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginLeft: 12,
+                    }}
+                  >
+                    {(
+                      p.userId === selfUserIdRef.current
+                        ? isAudioOn
+                        : p.bAudioOn
+                    ) ? (
+                      <FaMicrophone
+                        style={{ color: "#0f0", fontSize: 18 }}
+                        title="Mic On"
+                      />
+                    ) : (
+                      <FaMicrophoneSlash
+                        style={{ color: "#f00", fontSize: 18 }}
+                        title="Mic Off"
+                      />
+                    )}
+                    {(
+                      p.userId === selfUserIdRef.current
+                        ? isVideoOn
+                        : p.bVideoOn
+                    ) ? (
+                      <FaVideo
+                        style={{ color: "#0f0", fontSize: 18 }}
+                        title="Camera On"
+                      />
+                    ) : (
+                      <FaVideoSlash
+                        style={{ color: "#f00", fontSize: 18 }}
+                        title="Camera Off"
+                      />
+                    )}
+                    {networkQuality[p.userId] !== undefined && (
+                      <FaSignal
+                        style={{
+                          color:
+                            networkQuality[p.userId] >= 3
+                              ? "#0f0"
+                              : networkQuality[p.userId] === 2
+                                ? "#ff0"
+                                : "#f00",
+                          fontSize: 18,
+                        }}
+                        title={`Network: ${networkQuality[p.userId]}`}
+                      />
+                    )}
+                  </div>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
+          <style>{`
+            @keyframes slideInRight {
+              from { transform: translateX(100%); opacity: 0; }
+              to { transform: translateX(0); opacity: 1; }
+            }
+          `}</style>
         </div>
       )}
       {annotationError && <div className="error-page">{annotationError}</div>}
