@@ -196,8 +196,18 @@ const MeetingPage = () => {
       });
 
       // Add peer-audio-state-change listener to update participants state
-      client.on("peer-audio-state-change", () => {
-        setParticipants(client.getAllUser());
+      client.on("peer-audio-state-change", (payload) => {
+        if (payload && payload.userId) {
+          setParticipants((prev) =>
+            prev.map((user) =>
+              user.userId === payload.userId
+                ? { ...user, bAudioOn: payload.action === "Unmuted" }
+                : user
+            )
+          );
+        } else {
+          setParticipants(client.getAllUser());
+        }
       });
     };
 
