@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import ZoomVideo from "@zoom/videosdk";
 import { useZoom } from "../preview/ZoomContext";
+import MeetingLeft from "./MeetingLeft";
 import "./MeetingPage.css";
 import {
   FaMicrophone,
@@ -70,6 +71,9 @@ const MeetingPage = () => {
   const [networkQuality, setNetworkQuality] = useState({}); // { userId: level }
   const aspectRatioRefs = useRef({}); // { userId: aspectRatio }
   const [showEndMeetingConfirm, setShowEndMeetingConfirm] = useState(false);
+  const [showMediaWarning, setShowMediaWarning] = useState(false);
+  const [mediaWarningMessage, setMediaWarningMessage] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Refs
   const clientRef = useRef(null);
@@ -116,6 +120,41 @@ const MeetingPage = () => {
         console.error(`Failed to detach video for ${userId}`, e);
       }
     }
+  }, []);
+
+  // Refresh detection effect
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      // Check if this is a hard refresh (not just navigation)
+      if (event.type === "beforeunload") {
+        // Set a flag in sessionStorage to indicate this was a refresh
+        sessionStorage.setItem("meetingRefreshed", "true");
+      }
+    };
+
+    const handleLoad = () => {
+      // Check if we're returning from a refresh
+      const wasRefreshed = sessionStorage.getItem("meetingRefreshed");
+      if (wasRefreshed === "true") {
+        setIsRefreshing(true);
+        sessionStorage.removeItem("meetingRefreshed");
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("load", handleLoad);
+
+    // Check on initial load
+    const wasRefreshed = sessionStorage.getItem("meetingRefreshed");
+    if (wasRefreshed === "true") {
+      setIsRefreshing(true);
+      sessionStorage.removeItem("meetingRefreshed");
+    }
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("load", handleLoad);
+    };
   }, []);
 
   // Main session lifecycle effect
@@ -350,7 +389,7 @@ const MeetingPage = () => {
             ? "The host has ended the meeting."
             : `Session ended: ${payload.reason || "Closed by host or network"}`
         );
-        setError("Session ended. Please rejoin.");
+        navigate("/meeting-left");
       } else if (payload.state === "Reconnecting") {
         addNotification(`Reconnecting to session...`);
       } else if (payload.state === "Connected") {
@@ -359,7 +398,7 @@ const MeetingPage = () => {
         addNotification(
           `Session failed: ${payload.reason || payload.errorCode}`
         );
-        setError("Session failed. Please refresh.");
+        navigate("/meeting-left");
       }
     });
 
@@ -368,16 +407,23 @@ const MeetingPage = () => {
     client.on("device-permission-change", (payload) => {
       addNotification(`${payload.name} permission is ${payload.state}`);
       if (payload.state === "denied") {
-        setError(
-          `${payload.name} permission denied. Please grant it in browser settings.`
+        setMediaWarningMessage(
+          `Media error: Your mic is muted in system or browser settings. Please open your settings to unmute and adjust the level.`
         );
+        setShowMediaWarning(true);
       }
     });
 
     // Media failure handling
     client.on("active-media-failed", (payload) => {
-      addNotification(`Media error: ${payload.message || payload.code}`);
-      setError(`Media error: ${payload.message || payload.code}`);
+      const message = payload.message || payload.code || "Unknown media error";
+      addNotification(`Media error: ${message}`);
+
+      // Show warning dialog instead of throwing error
+      setMediaWarningMessage(
+        `We detected an issue with the microphone that we cannot resolve.\n\n Your mic is muted in system or browser settings.\n\n Please open your settings to unmute and adjust the level..\n\nPlease refresh the page to try to fix it.`
+      );
+      setShowMediaWarning(true);
     });
 
     // Audio/video state changes
@@ -386,6 +432,13 @@ const MeetingPage = () => {
         addNotification(`Audio ended: ${payload.source}`);
       } else if (payload.action === "Muted") {
         addNotification(`Audio muted: ${payload.source}`);
+        // Show warning for system-level mute
+        if (payload.source && payload.source.includes("system")) {
+          setMediaWarningMessage(
+            `Your microphone has been muted by the system.\n\nPlease check your system audio settings and unmute your microphone.`
+          );
+          setShowMediaWarning(true);
+        }
       }
     });
 
@@ -449,22 +502,31 @@ const MeetingPage = () => {
 
   const toggleAudio = useCallback(async () => {
     if (mediaStreamRef.current) {
-      if (isAudioOn) {
-        await mediaStreamRef.current.muteAudio();
-      } else {
-        await mediaStreamRef.current.unmuteAudio();
-      }
-      setIsAudioOn(!isAudioOn);
-      // Force update participants to reflect local audio state
-      if (clientRef.current) setParticipants(clientRef.current.getAllUser());
-      // Manually emit peer-audio-state-change for local user to update UI globally
-      if (clientRef.current) {
-        const event = new Event("peer-audio-state-change");
-        clientRef.current.emit &&
-          clientRef.current.emit("peer-audio-state-change", {
-            userId: selfUserIdRef.current,
-            action: isAudioOn ? "Muted" : "Unmuted",
-          });
+      try {
+        if (isAudioOn) {
+          await mediaStreamRef.current.muteAudio();
+        } else {
+          await mediaStreamRef.current.unmuteAudio();
+        }
+        setIsAudioOn(!isAudioOn);
+        // Force update participants to reflect local audio state
+        if (clientRef.current) setParticipants(clientRef.current.getAllUser());
+        // Manually emit peer-audio-state-change for local user to update UI globally
+        if (clientRef.current) {
+          const event = new Event("peer-audio-state-change");
+          clientRef.current.emit &&
+            clientRef.current.emit("peer-audio-state-change", {
+              userId: selfUserIdRef.current,
+              action: isAudioOn ? "Muted" : "Unmuted",
+            });
+        }
+      } catch (error) {
+        console.error("Toggle audio error:", error);
+        // Show warning instead of throwing error
+        setMediaWarningMessage(
+          `Media error: Your mic is muted in system or browser settings. Please open your settings to unmute and adjust the level.`
+        );
+        setShowMediaWarning(true);
       }
     }
   }, [isAudioOn]);
@@ -669,14 +731,16 @@ const MeetingPage = () => {
         setError("Failed to leave meeting.");
       }
     }
-    navigate("/");
+    navigate("/meeting-left");
   };
 
+  if (isRefreshing) return <MeetingLeft />;
   if (isJoining) return <div>Joining meeting...</div>;
   if (error)
     return (
       <div className="error-page">
-        Error: {error} <button onClick={() => navigate("/")}>Go Back</button>
+        Error: {error}{" "}
+        <button onClick={() => navigate("/meeting-left")}>Go Back</button>
       </div>
     );
 
@@ -1546,6 +1610,133 @@ const MeetingPage = () => {
                 }}
               >
                 End Meeting
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showMediaWarning && (
+        <div
+          onClick={() => {
+            setShowMediaWarning(false);
+            // Try to resume audio when clicking anywhere
+            if (mediaStreamRef.current && !isAudioOn) {
+              try {
+                mediaStreamRef.current.unmuteAudio();
+                setIsAudioOn(true);
+              } catch (error) {
+                console.error("Failed to resume audio:", error);
+              }
+            }
+          }}
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            background: "rgba(0,0,0,0.35)",
+            zIndex: 3000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#333",
+              borderRadius: 12,
+              padding: "24px 32px 24px 32px",
+              boxShadow: "0 4px 24px #0002",
+              minWidth: 400,
+              maxWidth: "90vw",
+              color: "#fff",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <div
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: "50%",
+                  background: "#ff9800",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginRight: 12,
+                  fontSize: 16,
+                  fontWeight: "bold",
+                }}
+              >
+                !
+              </div>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+                Active Media Failed
+              </h3>
+            </div>
+            <div
+              style={{
+                color: "#ccc",
+                fontSize: 14,
+                lineHeight: 1.5,
+                marginBottom: 24,
+                whiteSpace: "pre-line",
+              }}
+            >
+              {mediaWarningMessage}
+            </div>
+            <div
+              style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}
+            >
+              <button
+                onClick={() => {
+                  setShowMediaWarning(false);
+                  // Try to resume audio when dismissing the warning
+                  if (mediaStreamRef.current && !isAudioOn) {
+                    try {
+                      mediaStreamRef.current.unmuteAudio();
+                      setIsAudioOn(true);
+                    } catch (error) {
+                      console.error("Failed to resume audio:", error);
+                    }
+                  }
+                }}
+                style={{
+                  background: "transparent",
+                  color: "#fff",
+                  border: "1px solid #666",
+                  borderRadius: 6,
+                  padding: "8px 16px",
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowMediaWarning(false);
+                  navigate("/meeting-left");
+                }}
+                style={{
+                  background: "#007bff",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "8px 16px",
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                Refresh
               </button>
             </div>
           </div>
