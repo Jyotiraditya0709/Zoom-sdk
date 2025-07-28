@@ -201,13 +201,17 @@ const MeetingPage = () => {
           setParticipants((prev) =>
             prev.map((user) =>
               user.userId === payload.userId
-                ? { ...user, bAudioOn: payload.action === "Unmuted" }
+                ? { ...user, muted: payload.action === "Muted" }
                 : user
             )
           );
         } else {
           setParticipants(client.getAllUser());
         }
+      });
+      client.on("user-updated", () => {
+        setParticipants(client.getAllUser());
+        console.log("user-updated", client.getAllUser());
       });
     };
 
@@ -477,6 +481,17 @@ const MeetingPage = () => {
         await attachVideo(selfUserIdRef.current);
         setIsVideoOn(true);
       }
+      // Force update participants to reflect local video state
+      if (clientRef.current) setParticipants(clientRef.current.getAllUser());
+      // Manually emit peer-video-state-change for local user to update UI globally
+      if (clientRef.current) {
+        const event = new Event("peer-video-state-change");
+        clientRef.current.emit &&
+          clientRef.current.emit("peer-video-state-change", {
+            userId: selfUserIdRef.current,
+            action: isVideoOn ? "Stop" : "Start",
+          });
+      }
     } catch (e) {
       console.error("Toggle video error", e);
     }
@@ -665,6 +680,18 @@ const MeetingPage = () => {
       </div>
     );
 
+  console.log("participants: ", participants);
+  console.log(
+    "microphone states: ",
+    participants.map((p) => ({
+      userId: p.userId,
+      displayName: p.displayName,
+      muted: p.muted,
+      audio: p.audio,
+      isLocal: p.userId === selfUserIdRef.current,
+    }))
+  );
+
   return (
     <div className="meeting-container">
       <div className="top-bar">Zoom Meeting - {sessionName}</div>
@@ -794,7 +821,7 @@ const MeetingPage = () => {
                 {(
                   user.userId === selfUserIdRef.current
                     ? isAudioOn
-                    : user.bAudioOn
+                    : !user.muted
                 ) ? (
                   <FaMicrophone
                     style={{ marginLeft: 6, color: "#0f0" }}
@@ -864,7 +891,7 @@ const MeetingPage = () => {
                 {(
                   user.userId === selfUserIdRef.current
                     ? isAudioOn
-                    : user.bAudioOn
+                    : !user.muted
                 ) ? (
                   <FaMicrophone
                     style={{ marginLeft: 6, color: "#0f0" }}
@@ -1396,9 +1423,7 @@ const MeetingPage = () => {
                     }}
                   >
                     {(
-                      p.userId === selfUserIdRef.current
-                        ? isAudioOn
-                        : p.bAudioOn
+                      p.userId === selfUserIdRef.current ? isAudioOn : !p.muted
                     ) ? (
                       <FaMicrophone
                         style={{ color: "#0f0", fontSize: 18 }}
