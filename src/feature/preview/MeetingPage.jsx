@@ -80,7 +80,7 @@ const MeetingPage = () => {
   const mediaStreamRef = useRef(null);
   const videoContainerRefs = useRef({});
   const selfUserIdRef = useRef(null);
-  const VIDEO_QUALITY = 1; // 1: 360p, 3: 720p
+  const VIDEO_QUALITY = 3; // 1: 360p, 3: 720p
 
   // Parse URL Params
   const { sessionName, userName, role } = React.useMemo(() => {
@@ -258,6 +258,7 @@ const MeetingPage = () => {
       try {
         await client.init("en-US", "Global", {
           patchJsMedia: true,
+          enforceVirtualBackground: true,
           virtualBackground: { isSupport: true },
         });
         const signature = await getSignature();
@@ -917,7 +918,16 @@ const MeetingPage = () => {
           ))}
         </div>
       ) : (
-        <div className="video-grid">
+        <div
+          className={
+            "video-grid " +
+            (participants.length === 1
+              ? "one-participant"
+              : participants.length === 2
+                ? "two-participants"
+                : "")
+          }
+        >
           {participants.slice(0, 4).map((user) => (
             <div
               className={

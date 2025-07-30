@@ -10,7 +10,6 @@ let localAudioTrack = null;
 
 const Preview = () => {
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
   const navigate = useNavigate();
   const {
     selectedCamera,
@@ -84,6 +83,7 @@ const Preview = () => {
       client.current = ZoomVideo.createClient();
       await client.current.init("en-US", "Global", {
         patchJsMedia: true,
+        enforceVirtualBackground: true,
         virtualBackground: {
           isSupport: true,
           // resources: {
@@ -99,11 +99,17 @@ const Preview = () => {
         await localVideoTrack.start(videoRef.current);
         await localVideoTrack.updateVirtualBackground(undefined);
       } else if (bgMode === "blur") {
-        await localVideoTrack.start(canvasRef.current, { imageUrl: "blur" });
+        await localVideoTrack.start(
+          document.querySelector("#local-preview-video"),
+          { imageUrl: "blur" }
+        );
       } else if (bgMode === "image") {
-        await localVideoTrack.start(canvasRef.current, {
-          imageUrl: "/lib/vb-resource/background.jpg",
-        });
+        await localVideoTrack.start(
+          document.querySelector("#local-preview-video"),
+          {
+            imageUrl: "/lib/vb-resource/background.jpg",
+          }
+        );
       }
       // Create and start audio track
       if (!localAudioTrack) {
@@ -154,11 +160,17 @@ const Preview = () => {
           await localVideoTrack.start(videoRef.current);
           await localVideoTrack.updateVirtualBackground(undefined);
         } else if (bgMode === "blur") {
-          await localVideoTrack.start(canvasRef.current, { imageUrl: "blur" });
+          await localVideoTrack.start(
+            document.querySelector("#local-preview-video"),
+            { imageUrl: "blur" }
+          );
         } else if (bgMode === "image") {
-          await localVideoTrack.start(canvasRef.current, {
-            imageUrl: "/lib/vb-resource/background.jpg",
-          });
+          await localVideoTrack.start(
+            document.querySelector("#local-preview-video"),
+            {
+              imageUrl: "/lib/vb-resource/background.jpg",
+            }
+          );
         }
       } catch (err) {
         if (err.message && err.message.includes("VideoNotStartedError")) {
@@ -168,13 +180,19 @@ const Preview = () => {
               await localVideoTrack.start(videoRef.current);
               await localVideoTrack.updateVirtualBackground(undefined);
             } else if (bgMode === "blur") {
-              await localVideoTrack.start(canvasRef.current, {
-                imageUrl: "blur",
-              });
+              await localVideoTrack.start(
+                document.querySelector("#local-preview-video"),
+                {
+                  imageUrl: "blur",
+                }
+              );
             } else if (bgMode === "image") {
-              await localVideoTrack.start(canvasRef.current, {
-                imageUrl: "/lib/vb-resource/background.jpg",
-              });
+              await localVideoTrack.start(
+                document.querySelector("#local-preview-video"),
+                {
+                  imageUrl: "/lib/vb-resource/background.jpg",
+                }
+              );
             }
           } catch (e) {
             setError(
@@ -188,14 +206,11 @@ const Preview = () => {
         );
       }
     };
-    // Only run if the video element or canvas is mounted
-    if (
-      (bgMode === "none" && videoRef.current) ||
-      ((bgMode === "blur" || bgMode === "image") && canvasRef.current)
-    ) {
+    // Only run if the video element is mounted
+    if (videoRef.current) {
       updateVB();
     }
-  }, [bgMode, videoRef.current, canvasRef.current]);
+  }, [bgMode, videoRef.current]);
 
   useEffect(() => {
     if (selectedCamera && selectedMic) {
@@ -342,22 +357,26 @@ const Preview = () => {
     <div className="preview-page">
       <div className="preview-container">
         <div className="video-preview">
-          {bgMode === "none" ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              playsInline
-              style={{ width: "100%", height: "100%", background: "black" }}
-            ></video>
-          ) : (
-            <canvas
-              ref={canvasRef}
-              width={1280}
-              height={720}
-              style={{ width: "100%", height: "100%", background: "black" }}
-            />
-          )}
+          <video-player-container
+            className="local-preview-container"
+            style={{ width: "100%", height: "100%", background: "black" }}
+          >
+            {bgMode === "none" ? (
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                style={{ width: "100%", height: "100%" }}
+              ></video>
+            ) : (
+              <video-player
+                ref={videoRef}
+                id="local-preview-video"
+                style={{ width: "100%", height: "100%" }}
+              ></video-player>
+            )}
+          </video-player-container>
           {isLoading && <div className="loading">Starting preview...</div>}
           {error && <div className="error">{error}</div>}
         </div>

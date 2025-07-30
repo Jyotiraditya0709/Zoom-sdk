@@ -20,22 +20,27 @@
 }
 
 /* --- Video Grid Layout for up to 4 participants --- */
+/* --- Video Grid Layout for up to 4 participants --- */
 .video-grid {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
+  display: grid;
   gap: 16px;
   width: 100%;
-  height: calc(100vh - 120px); /* adjust for top/control bars */
+  height: calc(100vh - 120px);
   background: #181a1b;
-  padding: 24px 0;
+  padding: 24px;
+  box-sizing: border-box;
+
+  /* Dynamic 2x2 layout */
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-auto-rows: 1fr;
+  justify-items: stretch;
+  align-items: stretch;
 }
 
 .video-tile {
-  flex: 0 0 48%;
-  max-width: 48%;
-  aspect-ratio: 16/9;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 16 / 9;
   background: #222;
   border-radius: 18px;
   box-shadow: 0 2px 12px #0004;
@@ -44,9 +49,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition:
-    box-shadow 0.2s,
-    border 0.2s;
 }
 
 .video-tile.active-speaker {
@@ -353,6 +355,22 @@ canvas {
   max-width: 480px;
   max-height: 270px; /* 16:9 aspect ratio */
   margin: auto;
+}
+
+.video-grid.one-participant {
+  grid-template-columns: 1fr;
+  justify-content: center;
+}
+
+.video-grid.two-participants {
+  grid-template-columns: repeat(2, 1fr);
+  justify-content: center;
+}
+
+video-player-container {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 /* --- Professional Video Sidebar --- */
