@@ -249,7 +249,6 @@ const MeetingPage = () => {
       });
       client.on("user-updated", () => {
         setParticipants(client.getAllUser());
-        console.log("user-updated", client.getAllUser());
       });
     };
 
@@ -342,20 +341,56 @@ const MeetingPage = () => {
 
     // Add screen share event listeners
     client.on("passively-stop-share", () => {
+      console.log("[SCREEN SHARE] passively-stop-share event triggered");
       setIsSharingScreen(false);
     });
 
     client.on("active-share-change", (payload) => {
-      if (!mediaStreamRef.current) return;
+      console.log("[SCREEN SHARE] active-share-change:", {
+        state: payload.state,
+        userId: payload.userId,
+        isLocalUser: payload.userId === selfUserIdRef.current,
+      });
+
+      if (!mediaStreamRef.current) {
+        console.log("[SCREEN SHARE] ERROR: mediaStreamRef.current is null");
+        return;
+      }
+
       if (payload.state === "Active") {
-        setIsRemoteSharing(true);
-        mediaStreamRef.current.startShareView(
-          remoteShareContainerRef.current,
+        console.log(
+          "[SCREEN SHARE] Starting remote share view for user:",
           payload.userId
         );
+        setIsRemoteSharing(true);
+
+        try {
+          mediaStreamRef.current.startShareView(
+            remoteShareContainerRef.current,
+            payload.userId
+          );
+          console.log("[SCREEN SHARE] Remote share view started successfully");
+          addNotification(`Screen sharing started by ${payload.userId}`);
+        } catch (error) {
+          console.log(
+            "[SCREEN SHARE] Error starting remote share view:",
+            error
+          );
+        }
       } else if (payload.state === "Inactive") {
+        console.log("[SCREEN SHARE] Stopping remote share view");
         setIsRemoteSharing(false);
-        mediaStreamRef.current.stopShareView();
+
+        try {
+          mediaStreamRef.current.stopShareView();
+          console.log("[SCREEN SHARE] Remote share view stopped successfully");
+          addNotification("Screen sharing stopped");
+        } catch (error) {
+          console.log(
+            "[SCREEN SHARE] Error stopping remote share view:",
+            error
+          );
+        }
       }
     });
 
@@ -377,14 +412,103 @@ const MeetingPage = () => {
     // User join/leave notifications
     const handleUserAdded = (payload) => {
       payload.forEach((item) => {
+        console.log("[USER] User joined:", {
+          userId: item.userId,
+          displayName: item.displayName,
+          isLocal: item.userId === selfUserIdRef.current,
+        });
         addNotification(
           `${item.displayName || item.userId} joined the session.`
         );
+
+        // Re-register screen share event listeners for new participants
+        if (item.userId !== selfUserIdRef.current) {
+          console.log(
+            "[SCREEN SHARE] Re-registering events for new participant:",
+            item.userId
+          );
+          // Force a re-registration of screen share events
+          client.off("active-share-change");
+          client.on("active-share-change", (payload) => {
+            console.log("[SCREEN SHARE] active-share-change (re-registered):", {
+              state: payload.state,
+              userId: payload.userId,
+              isLocalUser: payload.userId === selfUserIdRef.current,
+            });
+
+            if (!mediaStreamRef.current) {
+              console.log(
+                "[SCREEN SHARE] ERROR: mediaStreamRef.current is null"
+              );
+              return;
+            }
+
+            if (payload.state === "Active") {
+              console.log(
+                "[SCREEN SHARE] Starting remote share view for user:",
+                payload.userId
+              );
+              setIsRemoteSharing(true);
+
+              // Wait for remote container to be available
+              setTimeout(() => {
+                if (!remoteShareContainerRef.current) {
+                  console.log(
+                    "[SCREEN SHARE] ERROR: Remote canvas ref is null"
+                  );
+                  return;
+                }
+
+                try {
+                  console.log(
+                    "[SCREEN SHARE] Remote canvas element:",
+                    remoteShareContainerRef.current
+                  );
+                  mediaStreamRef.current.startShareView(
+                    remoteShareContainerRef.current,
+                    payload.userId
+                  );
+                  console.log(
+                    "[SCREEN SHARE] Remote share view started successfully"
+                  );
+                  addNotification(
+                    `Screen sharing started by ${payload.userId}`
+                  );
+                } catch (error) {
+                  console.log(
+                    "[SCREEN SHARE] Error starting remote share view:",
+                    error
+                  );
+                }
+              }, 100);
+            } else if (payload.state === "Inactive") {
+              console.log("[SCREEN SHARE] Stopping remote share view");
+              setIsRemoteSharing(false);
+
+              try {
+                mediaStreamRef.current.stopShareView();
+                console.log(
+                  "[SCREEN SHARE] Remote share view stopped successfully"
+                );
+                addNotification("Screen sharing stopped");
+              } catch (error) {
+                console.log(
+                  "[SCREEN SHARE] Error stopping remote share view:",
+                  error
+                );
+              }
+            }
+          });
+        }
       });
       setParticipants(client.getAllUser());
     };
     const handleUserRemoved = (payload) => {
       payload.forEach((item) => {
+        console.log("[USER] User left:", {
+          userId: item.userId,
+          displayName: item.displayName,
+        });
         addNotification(`${item.displayName || item.userId} left the session.`);
       });
       setParticipants(client.getAllUser());
@@ -494,22 +618,6 @@ const MeetingPage = () => {
       client.off("video-aspect-ratio-change");
     };
   }, []);
-
-  // Effect to start recording when more than one user is present
-  useEffect(() => {
-    if (!isHost || !recordingClientRef.current) return;
-    if (recordingStatus !== "recording" && participants.length > 1) {
-      (async () => {
-        if (recordingClientRef.current.canStartRecording()) {
-          const res = await recordingClientRef.current.startCloudRecording();
-          if (res === "") {
-            setRecordingStatus("recording");
-            setShowRecordingNotice(true);
-          }
-        }
-      })();
-    }
-  }, [participants.length, isHost, recordingStatus]);
 
   const toggleAudio = useCallback(async () => {
     if (mediaStreamRef.current) {
@@ -627,45 +735,102 @@ const MeetingPage = () => {
   // Screen share start/stop logic
   const handleScreenShare = async () => {
     console.log(
-      "handleScreenShare called",
-      screenShareContainerRef.current,
+      "[SCREEN SHARE] handleScreenShare called, isSharingScreen:",
       isSharingScreen
     );
+
     if (!mediaStreamRef.current) {
-      console.log("mediaStreamRef.current is null");
+      console.log("[SCREEN SHARE] ERROR: mediaStreamRef.current is null");
       return;
     }
+
     try {
       if (!isSharingScreen) {
+        console.log("[SCREEN SHARE] Starting screen share...");
         const el = screenShareContainerRef.current;
         if (!el) {
+          console.log("[SCREEN SHARE] ERROR: Screen share element not found");
           setError("Screen share element not found.");
-          console.log("Screen share element not found");
           return;
         }
-        if (mediaStreamRef.current.isStartShareScreenWithVideoElement()) {
-          console.log("Starting share with video element");
-          await mediaStreamRef.current.startShareScreen(el);
-        } else {
-          console.log("Starting share with canvas element");
-          await mediaStreamRef.current.startShareScreen(el);
+
+        // Ensure video element is properly configured with static values
+        const videoElement = el;
+        console.log("[SCREEN SHARE] Video element initial state:", {
+          width: videoElement.width,
+          height: videoElement.height,
+          offsetWidth: videoElement.offsetWidth,
+          offsetHeight: videoElement.offsetHeight,
+        });
+
+        // Force static dimensions for consistent behavior
+        videoElement.width = 1920;
+        videoElement.height = 1080;
+        videoElement.style.display = "block";
+        videoElement.style.width = "100%";
+        videoElement.style.height = "auto";
+        videoElement.style.visibility = "visible";
+        videoElement.style.position = "relative";
+
+        // Ensure container is visible
+        const container = videoElement.parentElement;
+        if (container) {
+          container.style.display = "block";
+          container.style.visibility = "visible";
+          container.style.position = "relative";
         }
+
+        // Small delay for DOM update
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        console.log("[SCREEN SHARE] Video element after setup:", {
+          width: videoElement.width,
+          height: videoElement.height,
+          offsetWidth: videoElement.offsetWidth,
+          offsetHeight: videoElement.offsetHeight,
+        });
+
+        const canUseVideoElement =
+          mediaStreamRef.current.isStartShareScreenWithVideoElement();
+        console.log(
+          "[SCREEN SHARE] Can use video element:",
+          canUseVideoElement
+        );
+
+        if (canUseVideoElement) {
+          console.log("[SCREEN SHARE] Using video element for screen share");
+          await mediaStreamRef.current.startShareScreen(el);
+          console.log("[SCREEN SHARE] Screen share started successfully");
+        } else {
+          console.log("[SCREEN SHARE] Using canvas element for screen share");
+          await mediaStreamRef.current.startShareScreen(el);
+          console.log("[SCREEN SHARE] Screen share started successfully");
+        }
+
         setIsSharingScreen(true);
-        console.log("Screen sharing started");
+        addNotification("Screen sharing started");
       } else {
+        console.log("[SCREEN SHARE] Stopping screen share...");
         await mediaStreamRef.current.stopShareScreen();
+        console.log("[SCREEN SHARE] Screen sharing stopped successfully");
         setIsSharingScreen(false);
-        console.log("Screen sharing stopped");
+        addNotification("Screen sharing stopped");
       }
     } catch (err) {
+      console.log("[SCREEN SHARE] Error:", {
+        reason: err?.reason,
+        errorCode: err?.errorCode,
+        message: err?.message,
+        name: err?.name,
+      });
+
       if (err?.reason === "user deny screen share" || err?.errorCode === 6200) {
-        // User cancelled, do nothing or show a toast/snackbar
+        console.log("[SCREEN SHARE] User cancelled screen share");
         setIsSharingScreen(false);
         return;
       }
       setError("Screen share failed.");
       setIsSharingScreen(false);
-      console.log("Screen share error", err);
     }
   };
 
@@ -758,45 +923,64 @@ const MeetingPage = () => {
       </div>
     );
 
-  console.log("participants: ", participants);
-  console.log(
-    "microphone states: ",
-    participants.map((p) => ({
-      userId: p.userId,
-      displayName: p.displayName,
-      muted: p.muted,
-      audio: p.audio,
-      isLocal: p.userId === selfUserIdRef.current,
-    }))
-  );
-
   return (
     <div className="meeting-container">
       <div className="top-bar">Zoom Meeting - {sessionName}</div>
 
       {/* Screen Share Containers */}
-      {/* Replace the conditional rendering of the screen share container with always rendering it, but hide when not sharing */}
+      {/* Always render the screen share container but hide when not sharing */}
       <div
         className="screen-share-container"
-        style={{ display: isSharingScreen ? "block" : "none" }}
+        style={{
+          display: "block",
+          opacity: isSharingScreen ? 1 : 0,
+          visibility: isSharingScreen ? "visible" : "hidden",
+          position: isSharingScreen ? "relative" : "absolute",
+          top: isSharingScreen ? "auto" : "-9999px",
+        }}
       >
         <video
           ref={screenShareContainerRef}
           id="my-screen-share-content-video"
-          style={{ width: "100%", height: "auto" }}
+          width="1920"
+          height="1080"
+          style={{
+            width: "100%",
+            height: "auto",
+            display: "block",
+            position: "relative",
+          }}
           autoPlay
           muted
         />
       </div>
-      {isRemoteSharing && (
-        <div className="remote-share-container">
-          <canvas
-            ref={remoteShareContainerRef}
-            id="users-screen-share-content-canvas"
-            style={{ width: "100%", height: "auto" }}
-          />
-        </div>
-      )}
+      {/* Remote Share Container - Always rendered but hidden when not sharing */}
+      <div
+        className="remote-share-container"
+        style={{
+          display: "block",
+          opacity: isRemoteSharing ? 1 : 0,
+          visibility: isRemoteSharing ? "visible" : "hidden",
+          position: isRemoteSharing ? "relative" : "absolute",
+          top: isRemoteSharing ? "auto" : "-9999px",
+        }}
+      >
+        <canvas
+          ref={(el) => {
+            remoteShareContainerRef.current = el;
+            console.log("[SCREEN SHARE] Remote canvas ref set:", !!el);
+          }}
+          id="users-screen-share-content-canvas"
+          width="1920"
+          height="1080"
+          style={{
+            width: "100%",
+            height: "auto",
+            display: "block",
+            position: "relative",
+          }}
+        />
+      </div>
 
       {/* Notification toasts */}
       <div style={{ position: "fixed", top: 16, right: 16, zIndex: 3000 }}>

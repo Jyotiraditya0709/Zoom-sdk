@@ -278,11 +278,9 @@ const Preview = () => {
           setMicLevel(Math.round(v * 100));
         },
         onStartRecording: () => {
-          console.log("Mic test: onStartRecording");
           setMicTestPhase("recording");
         },
         onStartPlayRecording: () => {
-          console.log("Mic test: onStartPlayRecording");
           setMicTestPhase("playing");
           if (micTestPlaybackTimeout) {
             clearTimeout(micTestPlaybackTimeout);
@@ -290,7 +288,6 @@ const Preview = () => {
           }
         },
         onStopPlayRecording: () => {
-          console.log("Mic test: onStopPlayRecording");
           microPhoneTesterRef.current = null;
           setIsMicTesting(false);
           setMicLevel(0);
