@@ -22,12 +22,10 @@ const Preview = () => {
     setUserName,
     sessionName,
     setSessionName,
+    bgMode,
+    setBgMode,
     cleanup: contextCleanup,
-    // bgMode and setBgMode removed from context
   } = useZoom();
-
-  // Add local state for bgMode
-  const [bgMode, setBgMode] = useState("none");
   // Add local state for role
   const [role, setRole] = useState("1"); // 1 = host, 0 = attendee
 

@@ -23,7 +23,7 @@ import {
 const MeetingPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { getClient, cleanup: zoomCleanup } = useZoom();
+  const { getClient, cleanup: zoomCleanup, bgMode, setBgMode } = useZoom();
 
   // State
   const [participants, setParticipants] = useState([]);
@@ -32,7 +32,6 @@ const MeetingPage = () => {
   const [error, setError] = useState("");
   const [isAudioOn, setIsAudioOn] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(false);
-  const [bgMode, setBgMode] = useState("none");
   const [showModals, setShowModals] = useState({
     participants: false,
     chat: false,
@@ -276,9 +275,20 @@ const MeetingPage = () => {
           await mediaStreamRef.current.startAudio();
           setIsAudioOn(true);
 
-          // Start and attach self video
+          // Start and attach self video with initial background mode
           try {
-            await mediaStreamRef.current.startVideo();
+            let vbOptions = {};
+            if (bgMode === "blur") {
+              vbOptions = { virtualBackground: { imageUrl: "blur" } };
+            } else if (bgMode === "image") {
+              vbOptions = {
+                virtualBackground: {
+                  imageUrl: "/lib/vb-resource/background.jpg",
+                },
+              };
+            }
+
+            await mediaStreamRef.current.startVideo(vbOptions);
             setIsVideoOn(true);
             await attachVideo(selfUserIdRef.current);
           } catch (e) {
@@ -579,6 +589,9 @@ const MeetingPage = () => {
       await mediaStreamRef.current.startVideo(vbOptions);
       setBgMode(newBgMode);
       setIsVideoOn(true);
+
+      // Add notification for background change
+      addNotification(`Virtual background changed to ${newBgMode}`);
 
       // Re-attach video after changing background
       await attachVideo(selfUserIdRef.current);
